@@ -30,7 +30,7 @@ devtools::install_github("peizansheng/riattrition")
 This package provides the following functions to conduct randomization
 inference with sample attrition.
 
-# Functions for Testing Sharp Null Hypothesis
+### Functions for Testing Sharp Null Hypothesis
 
 - `pval_sharp()` obtains the p-value for testing the sharp null
   hypothesis $H_0: \tau = c$.
@@ -39,7 +39,7 @@ inference with sample attrition.
 - `ci_sharp()` obtains one-sided or two-sided confidence interval
   assuming constant treatment effect.
 
-# Functions for Testing Quantiles of Individual Treatment Effects
+### Functions for Testing Quantiles of Individual Treatment Effects
 
 - `pval_quantile()` obtains the p-value for testing the null hypothesis
   $H_{k,c}: \tau_{(k)} \leq c$, where $\tau_{(k)}$ denotes individual
