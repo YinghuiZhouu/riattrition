@@ -9,17 +9,18 @@ rank_score(n, method.list = list(name = "Wilcoxon"))
 \arguments{
 \item{n}{A positive integer that specifies the number of units.}
 
-\item{method.list}{A list that specifies the choice of the rank-sum test statistic.
+\item{method.list}{A list that specifies the choice of test statistic:
 \itemize{
 \item \code{list(name = "Wilcoxon")} (the default): the Wilcoxon rank-sum statistic.
-\item \code{list(name = "Stephenson", s = 10)}: the Stephenson rank-sum statistic with parameter s = 10.
+\item \code{list(name = "Stephenson", s = 10)}: the Stephenson rank-sum statistic with
+parameter \code{s = 10}, where \code{s} is a positive integer.
 }}
 }
 \value{
 An \eqn{n \times 1} vector.
 }
 \description{
-\code{rank_score()} calculates the scores of n units (ordered from low to high score)
+\code{rank_score()} calculates the scores of \code{n} units (ordered from low to high)
 given a specified test statistic, not allowing for ties.
 }
 \examples{

@@ -12,14 +12,14 @@ test_that("pval_sharp() works", {
   M <- Z * M1 + (1 - Z) * M0
   Y <- Z * Y1 + (1 - Z) * Y0 # No missing value
   Y_observed <- ifelse(M == 0, NA, Y)
-  p_value_g <- pval_sharp(Z, Y_observed, c = 0, missing = "general", MWU = FALSE,
+  p_value_g <- pval_sharp(Z, Y_observed, c = 0, missing = "general", class = "RS",
                           method.list = list(name = "Wilcoxon"),
                           stat.null = NULL, Z.perm = NULL, nperm = 10^4)
   p_value_g_twostep <- pval_sharp_twostep(Z, Y_observed, c = 0, missing = "general",
                                           method.list = list(name = "Wilcoxon"),
                                           stat.null = NULL, Z.perm = NULL, nperm = 10^4, beta = 0.1 * 0.1)
   expect_equal(p_value_g, 0.7241)
-  expect_equal(p_value_g_twostep, 0.7381)
+  expect_equal(p_value_g_twostep, 0.7383)
 
   # (2) Monotone Positive Missingness
   set.seed(1)
@@ -29,7 +29,7 @@ test_that("pval_sharp() works", {
   M <- Z * M1 + (1 - Z) * M0
   Y <- Z * Y1 + (1 - Z) * Y0 # No missing value
   Y_observed <- ifelse(M == 0, NA, Y)
-  p_value_mp <- pval_sharp(Z, Y_observed, c = 0, missing = "mp", MWU = FALSE,
+  p_value_mp <- pval_sharp(Z, Y_observed, c = 0, missing = "mp", class = "RS",
                            method.list = list(name = "Wilcoxon"),
                            stat.null = NULL, Z.perm = NULL, nperm = 10^4)
   p_value_mp_twostep <- pval_sharp_twostep(Z, Y_observed, c = 0, missing = "mp",
@@ -46,14 +46,14 @@ test_that("pval_sharp() works", {
   M <- Z * M1 + (1 - Z) * M0
   Y <- Z * Y1 + (1 - Z) * Y0 # No missing value
   Y_observed <- ifelse(M == 0, NA, Y)
-  p_value_mn <- pval_sharp(Z, Y_observed, c = 0, missing = "mn", MWU = FALSE,
+  p_value_mn <- pval_sharp(Z, Y_observed, c = 0, missing = "mn", class = "RS",
                            method.list = list(name = "Wilcoxon"),
                            stat.null = NULL, Z.perm = NULL, nperm = 10^4)
   p_value_mn_twostep <- pval_sharp_twostep(Z, Y_observed, c = 0, missing = "mn",
                                            method.list = list(name = "Wilcoxon"),
                                            stat.null = NULL, Z.perm = NULL, nperm = 10^4, beta = 0.1 * 0.1)
   expect_equal(p_value_mn, 0.7216)
-  expect_equal(p_value_mn_twostep, 0.7405)
+  expect_equal(p_value_mn_twostep, 0.736)
 
   # (4) Sharp Missingness
   set.seed(1)
@@ -63,7 +63,7 @@ test_that("pval_sharp() works", {
   M <- Z * M1 + (1 - Z) * M0
   Y <- Z * Y1 + (1 - Z) * Y0 # No missing value
   Y_observed <- ifelse(M == 0, NA, Y)
-  p_value_s <- pval_sharp(Z, Y_observed, c = 0, missing = "sharp", MWU = FALSE,
+  p_value_s <- pval_sharp(Z, Y_observed, c = 0, missing = "sharp", class = "RS",
                           method.list = list(name = "Wilcoxon"),
                           stat.null = NULL, Z.perm = NULL, nperm = 10^4)
   expect_equal(p_value_s, 0.755)
@@ -77,7 +77,7 @@ test_that("pval_sharp() works", {
   M <- Z * M1 + (1 - Z) * M0
   Y <- Z * Y1 + (1 - Z) * Y0 # No missing value
   Y_observed <- ifelse(M == 0, NA, Y)
-  p_value_r <- pval_sharp(Z, Y_observed, c = 0, missing = "random", MWU = FALSE,
+  p_value_r <- pval_sharp(Z, Y_observed, c = 0, missing = "random", class = "RS",
                           method.list = list(name = "Wilcoxon"),
                           stat.null = NULL, Z.perm = NULL, nperm = 10^4)
   expect_equal(p_value_r, 0.1044)

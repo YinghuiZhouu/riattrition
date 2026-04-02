@@ -12,7 +12,7 @@ rank_treat_relative_to_control(Z, Y)
 \item{Y}{Realized outcome (\eqn{n \times 1} vector, no \code{NA}s).}
 }
 \value{
-A scalar.
+An \eqn{n_1 \times 1} vector.
 }
 \description{
 Calculate the rank of treated units relative to control units

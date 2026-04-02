@@ -9,13 +9,12 @@
 
 ## Overview
 
-The package provides a set of functions for conducting randomization
-inference in randomized experiments with sample attrition. It constructs
-valid p-values and confidence intervals for testing sharp null
-hypotheses and quantiles of individual treatment effects when outcomes
-are missing for some units. The package accommodates a range of
-missingness mechanisms, including general, monotone, sharp, and
-missing-at-random mechanisms.
+The `riattrition` package provides a set of functions for conducting
+randomization inference in randomized experiments with sample attrition.
+It constructs valid p-values and confidence intervals for testing sharp
+null hypotheses when outcomes are missing for some units. The package
+accommodates a range of missing mechanisms, including general, monotone
+positive, monotone negative, sharp, and missing-at-random mechanisms.
 
 ## Installation
 
@@ -30,30 +29,83 @@ devtools::install_github("peizansheng/riattrition")
 This package provides the following functions to conduct randomization
 inference with sample attrition.
 
-### Functions for Testing Sharp Null Hypothesis
-
-- `pval_sharp()` obtains the p-value for testing the sharp null
-  hypothesis $H_0: \tau = c$.
-- `pval_sharp_twostep()` obtains the p-value for testing the sharp null
-  hypothesis $H_0: \tau = c$ using the two-step procedure.
-- `ci_sharp()` obtains one-sided or two-sided confidence interval
-  assuming constant treatment effect.
-
-### Functions for Testing Quantiles of Individual Treatment Effects
-
-- `pval_quantile()` obtains the p-value for testing the null hypothesis
-  $H_{k,c}: \tau_{(k)} \leq c$, where $\tau_{(k)}$ denotes individual
-  treatment effect at rank $k$.
-- `ci_quantile()` obtains one-sided confidence intervals for all
-  quantiles of individual treatment effects.
+`pval_sharp()` obtains the p-value for testing the sharp null hypothesis
+$H_0: \tau = c$.
 
 ``` r
-library(riattrition)
-?pval_sharp
-?pval_sharp_twostep
-?ci_sharp
-?pval_quantile
-?ci_quantile
+pval_sharp(Z, Y, c = 0, missing = "general", class = "RS", method.list = list(name = "Wilcoxon"),
+           stat.null = NULL, Z.perm = NULL, nperm = 10^4)
+ci_sharp(Z, Y, alternative, missing = "general", class = "RS", method.list = list(name = "Wilcoxon"),
+         stat.null = NULL, Z.perm = NULL, nperm = 10^4, alpha = 0.05, tol = 10^(-3))
+```
+
+where:
+
+- `Z`: Treatment assignment ($n \times 1$ vector).
+- `Y`: Observed outcome ($n \times 1$ vector, including `NA`s).
+- `c`: A scalar that specifies the sharp null hypothesis.
+- `missing`: A string that specifies the missing mechanism:
+  - `missing = "general"`: general missing mechanism.
+  - `missing = "mp"`: monotone positive missing mechanism
+    ($M_1 \geq M_0$).
+  - `missing = "mn"`: monotone negative missing mechanism
+    ($M_1 \leq M_0$).
+  - `missing = "sharp"`: sharp missing mechanism ($M_1 = M_0$).
+  - `missing = "random"`: missing at random mechanism.
+- `class`: A string that specifies the class of test statistic:
+  - `class = "RS"` (first class, default): rank-sum statistic.
+  - `class = "MWU+"` (second class): generalized Mann-Whitney U
+    statistic, defined as the sum of relative ranks for treated units.
+  - `class = "MWU-"` (second class): generalized Mann-Whitney U
+    statistic, defined as the negative sum of relative ranks for control
+    units.
+- `method.list`: A list that specifies the choice of test statistic:
+  - if `class = "RS"`, `method.list` can be `list(name = "Wilcoxon")` or
+    `list(name = "Stephenson", s = 10)`.
+  - if `class = "MWU+"` or `class = "MWU-"`, `method.list` can be
+    `list(name = "Wilcoxon")` or `list(name = "Polynomial", s = 10)`.
+- `stat.null`: An $nperm \times 1$ vector whose empirical distribution
+  approximates the randomization distribution of the rank-based
+  statistic.
+  - if `stat.null = NULL` (default), the function will calculate it
+    internally.
+  - if `missing = "general"`, `mp`, `mn`, then $n$ choose $n_1$.
+  - if `missing = "sharp"`, `random`, then $n_{11} + n_{01}$ choose
+    $n_{11}$.
+- Z.perm: A matrix that specifies the permuted assignments for
+  approximating the null distribution of the test statistic.
+  - if `Z.perm = NULL` (default), the function will calculate it
+    internally.
+  - if `missing = "general"`, `mp`, `mn`, then `Z.perm` is an
+    $n \times nperm$ matrix ($n$ choose $n_1$).
+  - if `missing = "sharp"`, `random`, then `Z.perm` is an
+    $(n_{11} + n_{01}) \times nperm$ matrix ($n_{11} + n_{01}$ choose
+    $n_{11}$).
+- `nperm`: A positive integer that specifies the number of permutations
+  to approximate the randomization distribution of the test statistic.
+
+`ci_sharp()` obtains one-sided or two-sided confidence interval assuming
+constant treatment effect.
+
+``` r
+ci_sharp(Z, Y, alternative, missing = "general", class = "RS", method.list = list(name = "Wilcoxon"),
+         stat.null = NULL, Z.perm = NULL, nperm = 10^4, alpha = 0.05, tol = 10^(-3))
+```
+
+`pval_sharp_twostep()` obtains the p-value for testing the sharp null
+hypothesis $H_0: \tau = c$ using the two-step procedure.
+
+``` r
+pval_sharp_twostep(Z, Y, c = 0, missing, method.list = list(name = "Wilcoxon"),
+                   stat.null = NULL, Z.perm = NULL, nperm = 10^4, beta)
+```
+
+`ci_sharp_twostep()` obtains one-sided or two-sided confidence interval
+assuming constant treatment effect using the two-step procedure.
+
+``` r
+ci_sharp_twostep(Z, Y, alternative, missing = "general", method.list = list(name = "Wilcoxon"),
+                 stat.null = NULL, Z.perm = NULL, nperm = 10^4, alpha = 0.05, beta = 0.1 * 0.05, tol = 10^(-3))
 ```
 
 ## Usage

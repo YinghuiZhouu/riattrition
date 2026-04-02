@@ -2,7 +2,7 @@
 % Please edit documentation in R/0_function_sharp_null.R
 \name{assign_CRE}
 \alias{assign_CRE}
-\title{Generate matrix of complete randomization assignments}
+\title{Generate treatment assignments from a completely randomized experiment}
 \usage{
 assign_CRE(n, m, nperm)
 }
@@ -11,13 +11,15 @@ assign_CRE(n, m, nperm)
 
 \item{m}{A positive integer that specifies the number of treated units.}
 
-\item{nperm}{A positive integer representing the number of permutations.}
+\item{nperm}{A positive integer that specifies the number of permutations to
+approximate the randomization distribution of the test statistic.}
 }
 \value{
 An \eqn{n \times nperm} matrix.
 }
 \description{
-Draw multiple assignments from a completely randomized experiment
+\code{assign_CRE()} draws \code{nperm} independent assignments, each assigning
+exactly \code{m} of \code{n} units to treatment.
 }
 \examples{
 assign_CRE(n = 5, m = 3, nperm = 10^4)

@@ -8,7 +8,7 @@ pval_sharp_control(
   Z,
   Y,
   c = 0,
-  MWU = FALSE,
+  class = "RS",
   method.list = list(name = "Wilcoxon"),
   stat.null = NULL,
   Z.perm = NULL,
@@ -20,49 +20,54 @@ pval_sharp_control(
 
 \item{Y}{Observed outcome (\eqn{n \times 1} vector, including \code{NA}s).}
 
-\item{c}{A scalar or vector specifying the sharp null hypothesis.}
+\item{c}{A scalar that specifies the sharp null hypothesis.}
 
-\item{MWU}{A logical value that specifies the class of test statistic.
+\item{class}{A string that specifies the class of test statistic:
 \itemize{
-\item \code{MWU = FALSE} (first class statistic, default): rank-sum statistic.
-\item \code{MWU = TRUE} (second class statistic): generalized Mann-Whitney U statistic.
+\item \code{class = "RS"} (first class, default): rank-sum statistic.
+\item \code{class = "MWU+"} (second class): generalized Mann-Whitney U statistic,
+defined as the sum of relative ranks for treated units.
+\item \code{class = "MWU-"} (second class): generalized Mann-Whitney U statistic,
+defined as the negative sum of relative ranks for control units.
 }}
 
-\item{method.list}{A list that specifies the choice of the rank-based test statistic.
+\item{method.list}{A list that specifies the choice of test statistic:
 \itemize{
-\item if \code{MWU = FALSE}, \code{method.list} can be \code{list(name = "Wilcoxon")} or \code{list(name = "Stephenson", s = 10)}.
-\item if \code{MWU = TRUE}, \code{method.list} can be \code{list(name = "Wilcoxon")} or \code{list(name = "Polynomial", s = 10)}.
+\item if \code{class = "RS"}, \code{method.list} can be \code{list(name = "Wilcoxon")} or
+\code{list(name = "Stephenson", s = 10)}.
+\item if \code{class = "MWU+"} or \code{class = "MWU-"}, \code{method.list} can be
+\code{list(name = "Wilcoxon")} or \code{list(name = "Polynomial", s = 10)}.
 }}
 
 \item{stat.null}{An \eqn{nperm \times 1} vector whose empirical distribution
-approximates the randomization distribution of the rank-sum statistic (n choose n1).
+approximates the randomization distribution of the rank-based statistic
+(\eqn{n} choose \eqn{n_1}).
 \itemize{
 \item if \code{stat.null = NULL} (default), the function will calculate it internally.
 }}
 
-\item{Z.perm}{An \eqn{n \times nperm} matrix that specifies the permutated assignments
-for approximating the null distribution of the test statistic (n choose n1).
+\item{Z.perm}{An \eqn{n \times nperm} matrix that specifies the permuted assignments
+for approximating the null distribution of the test statistic
+(\eqn{n} choose \eqn{n_1}).
 \itemize{
 \item if \code{Z.perm = NULL} (default), the function will calculate it internally.
 }}
 
-\item{nperm}{A positive integer representing the number of permutations to
+\item{nperm}{A positive integer that specifies the number of permutations to
 approximate the randomization distribution of the test statistic.}
 }
 \value{
 The p-value for testing the specified sharp null hypothesis of interest.
 }
 \description{
-\code{pval_sharp_control()} obtains the p-value for testing the sharp null hypothesis \eqn{H_0: \tau = c}.
-
-Approach 1: use the worst-case imputed control potential outcomes \eqn{Y(0)} to calculate the test statistic.
+\code{pval_sharp_control()} obtains the p-value for testing the sharp null hypothesis
+\eqn{H_0: \tau = c}, using the worst-case imputed control potential outcomes \eqn{Y(0)}.
 }
 \examples{
 Z <- c(1, 1, 1, 0, 0, 0)
 Y <- c(NA, 8, 6, 3, 4, NA)
-pval_sharp_control(
-  Z, Y, c = 0, MWU = FALSE,
-  method.list = list(name = "Wilcoxon"),
+pval_sharp_control(Z, Y,
+  c = 0, class = "RS", method.list = list(name = "Wilcoxon"),
   stat.null = NULL, Z.perm = NULL, nperm = 10^4
 )
 }

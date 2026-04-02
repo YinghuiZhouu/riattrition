@@ -4,23 +4,28 @@
 \alias{test_stat}
 \title{Calculate the rank-based test statistic}
 \usage{
-test_stat(Z, Y, MWU = FALSE, method.list = list(name = "Wilcoxon"))
+test_stat(Z, Y, class = "RS", method.list = list(name = "Wilcoxon"))
 }
 \arguments{
 \item{Z}{Treatment assignment (\eqn{n \times 1} vector).}
 
 \item{Y}{Realized outcome (\eqn{n \times 1} vector, no \code{NA}s).}
 
-\item{MWU}{A logical value that specifies the class of test statistic.
+\item{class}{A string that specifies the class of test statistic:
 \itemize{
-\item \code{MWU = FALSE} (first class statistic, default): rank-sum statistic.
-\item \code{MWU = TRUE} (second class statistic): generalized Mann-Whitney U statistic.
+\item \code{class = "RS"} (first class, default): rank-sum statistic.
+\item \code{class = "MWU+"} (second class): generalized Mann-Whitney U statistic,
+defined as the sum of relative ranks for treated units.
+\item \code{class = "MWU-"} (second class): generalized Mann-Whitney U statistic,
+defined as the negative sum of relative ranks for control units.
 }}
 
-\item{method.list}{A list that specifies the choice of the rank-based test statistic.
+\item{method.list}{A list that specifies the choice of test statistic:
 \itemize{
-\item if \code{MWU = FALSE}, \code{method.list} can be \code{list(name = "Wilcoxon")} or \code{list(name = "Stephenson", s = 10)}.
-\item if \code{MWU = TRUE}, \code{method.list} can be \code{list(name = "Wilcoxon")} or \code{list(name = "Polynomial", s = 10)}.
+\item if \code{class = "RS"}, \code{method.list} can be \code{list(name = "Wilcoxon")} or
+\code{list(name = "Stephenson", s = 10)}.
+\item if \code{class = "MWU+"} or \code{class = "MWU-"}, \code{method.list} can be
+\code{list(name = "Wilcoxon")} or \code{list(name = "Polynomial", s = 10)}.
 }}
 }
 \value{
@@ -32,8 +37,10 @@ A scalar.
 \examples{
 Z <- c(1, 1, 1, 0, 0)
 Y <- c(2, 4, 3, 1, 0)
-test_stat(Z, Y, MWU = FALSE, list(name = "Wilcoxon")) # 2.4
-test_stat(Z, Y, MWU = FALSE, list(name = "Stephenson", s = 2)) # 2.25
-test_stat(Z, Y, MWU = TRUE, list(name = "Wilcoxon")) # 6
-test_stat(Z, Y, MWU = TRUE, list(name = "Polynomial", s = 2)) # 6
+test_stat(Z, Y, class = "RS", list(name = "Wilcoxon")) # 2.4
+test_stat(Z, Y, class = "RS", list(name = "Stephenson", s = 2)) # 2.25
+test_stat(Z, Y, class = "MWU+", list(name = "Wilcoxon")) # 6
+test_stat(Z, Y, class = "MWU+", list(name = "Polynomial", s = 2)) # 6
+test_stat(Z, Y, class = "MWU-", list(name = "Wilcoxon")) # 0
+test_stat(Z, Y, class = "MWU-", list(name = "Polynomial", s = 2)) # 0
 }

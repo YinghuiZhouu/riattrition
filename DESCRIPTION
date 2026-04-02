@@ -4,17 +4,19 @@ Version: 0.0.0.9000
 Authors@R: 
     person("Peizan", "Sheng", , "peizan@uchicago.edu", role = c("aut", "cre"))
 Description: Constructs valid p-values and confidence intervals for testing 
-    sharp null hypotheses and quantiles of individual treatment effects in 
-    randomized experiments with missing outcomes. The package accommodates a 
-    range of missingness mechanisms, including general, monotone, sharp, and 
-    missing-at-random mechanisms.
+    sharp null hypotheses in randomized experiments with missing outcomes. 
+    The package accommodates a range of missing mechanisms, including general, 
+    monotone positive, monotone negative, sharp, and missing-at-random mechanisms.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
 Imports: 
     stats,
-    extraDistr
+    ExactCIone
 Suggests: 
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
+Depends: 
+    R (>= 3.5)
+LazyData: true
