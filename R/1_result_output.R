@@ -1,3 +1,28 @@
+#----------- Applied-user Result Wrapper and Printing -------------------------#
+#
+# This file is intentionally a thin layer on top of the original inference
+# engine in:
+#   * R/0_function_sharp_null.R
+#   * R/0_function_sharp_null_twostep.R
+#
+# Conceptually, the division of labor is:
+#   * Old files: core identification/inference logic
+#       - test_stat()
+#       - null_dist()
+#       - ci_sharp()
+#       - ci_sharp_twostep()
+#       - psi(), uci(), etc.
+#   * This file: applied-user interface and presentation logic
+#       - richer result object
+#       - blocked-randomization helper for permutations
+#       - missingness/block diagnostics
+#       - print()/summary() methods
+#
+# In other words, this file mostly asks:
+#   "How should we package and display the underlying RI calculations?"
+# rather than:
+#   "What is the underlying sharp-null / two-step procedure?"
+#
 #' Attrition inference result for applied users
 #'
 #' `ri_test()` wraps the existing sharp-null attrition inference functions and
@@ -42,21 +67,34 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
                     alpha = 0.05, tol = 10^(-3),
                     include_ci = TRUE, include_twostep = NULL,
                     beta = 0.1 * alpha) {
+  # By default, include the two-step procedure only for the missingness
+  # assumptions for which the package currently has dedicated support.
   if (is.null(include_twostep)) {
     include_twostep <- missing %in% c("general", "mp", "mn")
   }
 
+  # The original package expects a permutation matrix Z.perm.  If the user does
+  # not supply one, we construct it here using either:
+  #   * complete randomization (assign_CRE() from 0_function_sharp_null.R), or
+  #   * blocked randomization (.ri_assign_blocked(), added in this file).
   if (is.null(Z.perm)) {
     Z.perm <- .ri_default_assignments(
       Z = Z, Y = Y, missing = missing, block = block, nperm = nperm
     )
   }
 
+  # Sharp-null details are calculated by a wrapper defined below, but that
+  # wrapper delegates the core rank-based calculations to:
+  #   * null_dist()   from 0_function_sharp_null.R
+  #   * test_stat()   from 0_function_sharp_null.R
   sharp_details <- .ri_sharp_details(
     Z = Z, Y = Y, c = c, missing = missing, class = class,
     method.list = method.list, stat.null = stat.null, Z.perm = Z.perm, nperm = nperm
   )
 
+  # Confidence intervals are still computed by the original package function
+  # ci_sharp(); .ri_safe_ci() is only a small convenience wrapper that turns
+  # failures into NA rather than interrupting printing.
   sharp_ci <- .ri_safe_ci(
     fn = ci_sharp,
     Z = Z, Y = Y, alternative = alternative, missing = missing,
@@ -78,6 +116,9 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   notes <- character(0)
 
   if (include_twostep) {
+    # The "two-step" row is optional.  The complicated identification argument
+    # still lives in the original / legacy codebase; this file only standardizes
+    # the resulting output so it looks parallel to the sharp-null row.
     twostep_details <- tryCatch(
       .ri_twostep_details(
         Z = Z, Y = Y, c = c, missing = missing, method.list = method.list,
@@ -89,6 +130,7 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
     if (inherits(twostep_details, "error")) {
       notes <- c(notes, paste("Two-step output not added:", conditionMessage(twostep_details)))
     } else {
+      # ci_sharp_twostep() is defined in 0_function_sharp_null_twostep.R.
       twostep_ci <- .ri_safe_ci(
         fn = ci_sharp_twostep,
         Z = Z, Y = Y, alternative = alternative, missing = missing,
@@ -111,6 +153,9 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
     }
   }
 
+  # Return a richer S3 object than the original scalar p-value interface.  The
+  # actual inferential content is unchanged; we are just storing enough metadata
+  # to print something that applied users can immediately interpret.
   structure(
     list(
       call = match.call(),
@@ -132,6 +177,11 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   )
 }
 
+#----------- New helper: missingness summary ---------------------------------#
+#
+# This helper is new in the applied-user wrapper.  It does not perform any
+# inference.  Its only job is to summarize how much missingness/attrition exists
+# overall and by treatment status.
 .ri_missing_counts <- function(Z, Y) {
   M <- as.numeric(!is.na(Y))
   n_total <- length(Z)
@@ -163,6 +213,11 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   )
 }
 
+#----------- New helper: interpretation note for mp vs mn --------------------#
+#
+# This is also presentation-only logic.  It gives the user a gentle reminder
+# about whether the observed attrition pattern is more compatible with mp or mn.
+# Importantly, it does NOT claim to identify the true missingness mechanism.
 .ri_assumption_hint <- function(counts, tol = 1e-8) {
   diff <- counts$attrition_rate_treat - counts$attrition_rate_control
 
@@ -177,6 +232,12 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   "Treated attrition is higher than control attrition; this is more consistent with mn than mp, although rates alone do not identify the missingness mechanism."
 }
 
+#----------- New helper: block-level attrition diagnostics --------------------#
+#
+# This helper exists because the original package assumed complete randomization.
+# For blocked designs, users usually want to know not just pooled attrition, but
+# also whether attrition differences are systematically positive/negative within
+# block.
 .ri_block_diagnostics <- function(Z, Y, block) {
   if (is.null(block)) {
     return(NULL)
@@ -223,17 +284,34 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
 
   list(
     n_blocks = length(blocks),
+    # These summaries are deliberately simple: they provide a quick diagnostic
+    # of the direction of within-block attrition imbalance.
     mean_within_block_attrition_diff = mean(valid_diff),
     median_within_block_attrition_diff = stats::median(valid_diff),
     block_table = block_table
   )
 }
 
+#----------- New helper: choose the permutation scheme ------------------------#
+#
+# This is the main design-aware addition in this file.
+#
+# Old behavior:
+#   * complete randomization only, via assign_CRE()
+#
+# New behavior:
+#   * if block is supplied, generate permutations within block while preserving
+#     the treated count in each block.
+#
+# For missing = general/mp/mn, inference is defined on all randomized units.
+# For other cases, inference is restricted to observed units, matching the logic
+# in the legacy functions.
 .ri_default_assignments <- function(Z, Y, missing, block, nperm) {
   M <- as.numeric(!is.na(Y))
 
   if (missing %in% c("general", "mp", "mn")) {
     if (is.null(block)) {
+      # assign_CRE() comes from 0_function_sharp_null.R.
       return(assign_CRE(length(Z), sum(Z), nperm))
     }
     return(.ri_assign_blocked(Z = Z, block = block, nperm = nperm))
@@ -246,6 +324,13 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   .ri_assign_blocked(Z = Z.obs, block = block[M == 1], nperm = nperm)
 }
 
+#----------- New helper: blocked permutation matrix --------------------------#
+#
+# This function has no analogue in the original complete-randomization code.
+# It implements the natural randomization distribution for a blocked experiment:
+#   * blocks stay fixed,
+#   * the treated count within each block stays fixed,
+#   * treatment labels are shuffled only inside each block.
 .ri_assign_blocked <- function(Z, block, nperm) {
   block <- as.character(block)
   blocks <- unique(block)
@@ -270,6 +355,10 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   Z.perm
 }
 
+#----------- New helper: user-facing test statistic label ---------------------#
+#
+# The old package exposes class/method internals.  This helper turns those into
+# a readable label for printing.
 .ri_test_label <- function(class, method.list) {
   class_label <- switch(
     class,
@@ -281,16 +370,47 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   paste(class_label, "/", method.list$name)
 }
 
+#----------- Bridge to legacy sharp-null engine -------------------------------#
+#
+# This helper is where the new wrapper meets the old inference engine.
+#
+# Inputs:
+#   * Z, Y, c, missing, class, method.list, Z.perm
+# Output:
+#   * observed test statistic
+#   * p-value
+#   * missingness counts
+#
+# What is inherited from 0_function_sharp_null.R?
+#   * null_dist()
+#   * test_stat()
+#
+# What is new here?
+#   * user-facing bookkeeping
+#   * explicit construction of the completed outcome under each missingness
+#     assumption so it can be summarized and routed into the original functions
 .ri_sharp_details <- function(Z, Y, c, missing, class, method.list, stat.null, Z.perm, nperm) {
   counts <- .ri_missing_counts(Z, Y)
   M <- as.numeric(!is.na(Y))
   n <- counts$n_total
   n1 <- counts$n_treat
 
+  # Under the sharp null tau = c, these are the imputed potential outcomes:
+  #   Y1 = Y0 + c
+  #   Y0 = Y1 - c
+  # Given observed Y and assignment Z, these formulas recover the missing
+  # potential outcome for observed units.
   Y1.imp <- Y + (1 - Z) * c
   Y0.imp <- Y - Z * c
 
   if (missing %in% c("general", "mp", "mn")) {
+    # These default bounds encode the "worst-case" completion rule under each
+    # assumption.  They are not new theory; they are a compact way of expressing
+    # the completion step before handing the completed outcome to test_stat().
+    #
+    # b00: units missing under both treatment states
+    # b01: observed if treated, missing if control
+    # b10: missing if treated, observed if control
     defaults <- switch(
       missing,
       general = list(b00 = 0, b01 = Inf, b10 = -Inf),
@@ -301,6 +421,11 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
     Y0.com.imp <- rep(NA_real_, n)
 
     if (missing == "general") {
+      # general:
+      #   * observed treated outcomes contribute their imputed control value
+      #   * missing treated outcomes are assigned the least favorable value -Inf
+      #   * observed control outcomes contribute their observed/imputed control value
+      #   * missing control outcomes are assigned the most favorable value Inf
       Y0.com.imp[Z == 1 & M == 1] <- pmin(Y0.imp[Z == 1 & M == 1], defaults$b01)
       Y0.com.imp[Z == 1 & M == 0] <- min(defaults$b00, defaults$b10)
       Y0.com.imp[Z == 0 & M == 1] <- pmax(Y0.imp[Z == 0 & M == 1], defaults$b10)
@@ -308,6 +433,9 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
     }
 
     if (missing == "mp") {
+      # mp ("monotone positive"): treatment weakly increases response.
+      # Relative to general missingness, the completion reflects the direction
+      # restriction M1 >= M0.
       Y0.com.imp[Z == 1 & M == 1] <- pmin(Y0.imp[Z == 1 & M == 1], defaults$b01)
       Y0.com.imp[Z == 1 & M == 0] <- defaults$b00
       Y0.com.imp[Z == 0 & M == 1] <- Y0.imp[Z == 0 & M == 1]
@@ -315,6 +443,8 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
     }
 
     if (missing == "mn") {
+      # mn ("monotone negative"): treatment weakly decreases response.
+      # This is the mirror-image directional restriction M1 <= M0.
       Y0.com.imp[Z == 1 & M == 1] <- Y0.imp[Z == 1 & M == 1]
       Y0.com.imp[Z == 1 & M == 0] <- min(defaults$b00, defaults$b10)
       Y0.com.imp[Z == 0 & M == 1] <- pmax(Y0.imp[Z == 0 & M == 1], defaults$b10)
@@ -322,9 +452,12 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
     }
 
     if (is.null(stat.null)) {
+      # null_dist() is imported from 0_function_sharp_null.R.  At this point all
+      # design information has already been folded into Z.perm.
       stat.null <- null_dist(n, n1, class = class, method.list = method.list, Z.perm = Z.perm, nperm = nperm)
     }
 
+    # test_stat() is also imported from 0_function_sharp_null.R.
     stat.obs <- test_stat(Z = Z, Y = Y0.com.imp, class = class, method.list = method.list)
     p.value <- mean(stat.null >= stat.obs)
 
@@ -341,6 +474,8 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   n1.obs <- sum(Z.obs)
 
   if (is.null(stat.null)) {
+    # In the non-general branch the original procedure works only on units with
+    # observed outcomes, so we pass the reduced observed sample to null_dist().
     stat.null <- null_dist(n.obs, n1.obs, class = class, method.list = method.list, Z.perm = Z.perm, nperm = nperm)
   }
 
@@ -354,6 +489,14 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   )
 }
 
+#----------- Bridge to legacy two-step engine --------------------------------#
+#
+# This dispatcher is new, but each branch below still relies on identification
+# ingredients from the original two-step implementation:
+#   * psi()
+#   * uci()
+#   * null_dist()
+#   * test_stat()
 .ri_twostep_details <- function(Z, Y, c, missing, method.list, Z.perm, nperm, beta) {
   if (missing == "general") {
     return(.ri_twostep_general_details(Z, Y, c, method.list, Z.perm, nperm, beta))
@@ -368,6 +511,12 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   stop("Two-step output is currently supported only for general, mp, and mn missingness.")
 }
 
+#----------- General-missingness two-step row --------------------------------#
+#
+# This is the most algebraically involved part of the file.  The formulas are
+# not invented here; they are the applied-user wrapper's implementation of the
+# existing two-step procedure, with the final output standardized into a simple
+# list(stat_obs, p_value).
 .ri_twostep_general_details <- function(Z, Y, c, method.list, Z.perm, nperm, beta) {
   M <- as.numeric(!is.na(Y))
   n <- length(Z)
@@ -382,6 +531,10 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   beta2 <- beta / 2
 
   if (beta > 0) {
+    # WhyperCI_M() gives a confidence region for the number of always-observed /
+    # partially observed units.  This is one of the steps that accounts for
+    # uncertainty about missingness patterns before computing the worst-case test
+    # statistic.
     M.mat <- ExactCIone::WhyperCI_M(x = n01, n = n0, N = n, conf.level = 1 - beta1)
     M1hat <- M.mat$CI[1, 2]
     M2hat <- M.mat$CI[1, 3]
@@ -436,6 +589,9 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
 
   TK.vec <- rep(NA_real_, Kubar - Klbar + 1)
   for (K in Klbar:Kubar) {
+    # Each K indexes a feasible latent configuration of missing potential
+    # outcomes.  We evaluate the statistic over that feasible set and take the
+    # worst case below.
     J <- min(floor(n0 * (dubar + K / n1)), n01)
     L <- min(mubar - K, n10)
 
@@ -459,6 +615,9 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
       sum(C.J[ind.sort.C.treat.miss[seq_len(n10 - L)]])
   }
 
+  # The two-step statistic is the most conservative value across feasible latent
+  # configurations.  The null distribution itself is still obtained from the
+  # original null_dist() function.
   stat.obs <- min(TK.vec)
   stat.null <- null_dist(n, n1, class = "MWU+", method.list = method.list, Z.perm = Z.perm, nperm = nperm)
   p.value <- min(mean(stat.null >= stat.obs) + beta, 1)
@@ -466,6 +625,7 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   list(stat_obs = stat.obs, p_value = p.value)
 }
 
+#----------- Monotone-positive two-step row ----------------------------------#
 .ri_twostep_mp_details <- function(Z, Y, c, method.list, Z.perm, nperm, beta) {
   M <- as.numeric(!is.na(Y))
   n <- length(Z)
@@ -478,6 +638,8 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   Mhat <- uci(N = n, x = n01, n = n0, alpha = beta)
   mlbar <- max(n11 + n01 - Mhat, 0)
 
+  # Under mp, missing outcomes are completed in the direction implied by
+  # M1 >= M0, and the ranking-based statistic is then computed using MWU+.
   Y.comp <- ifelse(M == 1, Y, Inf)
   ind.treat.obs <- which(Z == 1 & M == 1)
   ind.control <- which(Z == 0)
@@ -513,6 +675,7 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   list(stat_obs = stat.obs, p_value = p.value)
 }
 
+#----------- Monotone-negative two-step row ----------------------------------#
 .ri_twostep_mn_details <- function(Z, Y, c, method.list, Z.perm, nperm, beta) {
   M <- as.numeric(!is.na(Y))
   n <- length(Z)
@@ -524,6 +687,7 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   Mhat <- uci(N = n, x = n11, n = n1, alpha = beta)
   mlbar <- max(n11 + n01 - Mhat, 0)
 
+  # Under mn, the directional restriction is reversed and the code uses MWU-.
   Y.comp <- ifelse(M == 1, Y - c, -Inf)
   ind.control.obs <- which(Z == 0 & M == 1)
   ind.treat <- which(Z == 1)
@@ -559,6 +723,10 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   list(stat_obs = stat.obs, p_value = p.value)
 }
 
+#----------- New helper: transform for MWU-type two-step statistics ----------#
+#
+# This helper is local to the applied-user wrapper.  It converts method.list
+# into a scalar transformation phi() used inside the MWU-style two-step code.
 .ri_phi <- function(method.list) {
   if (method.list$name == "Wilcoxon") {
     return(function(x) x)
@@ -569,6 +737,10 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   stop("Unsupported method.list for two-step output.")
 }
 
+#----------- New helper: fail-soft CI handling -------------------------------#
+#
+# The original CI functions can error in edge cases.  For printing, it is often
+# preferable to display NA rather than abort the whole call.
 .ri_safe_ci <- function(fn, ..., include_ci) {
   if (!include_ci) {
     return(list(lower = NA_real_, upper = NA_real_))
@@ -586,6 +758,9 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   list(lower = ci[[1]], upper = ci[[2]])
 }
 
+#----------- New formatting helpers ------------------------------------------#
+#
+# These helpers are purely cosmetic.  They never affect inference.
 .ri_format_num <- function(x, digits = 3) {
   if (is.na(x)) {
     return("NA")
@@ -618,6 +793,15 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   )
 }
 
+#----------- S3 print/summary methods ----------------------------------------#
+#
+# These are entirely new relative to the legacy package interface.  They turn
+# the stored result object into an "rdrobust-style" printed summary emphasizing:
+#   * missingness summary
+#   * test statistic
+#   * p-value
+#   * confidence interval
+# while omitting regression-style columns such as standard errors and z-stats.
 #' @export
 print.riattrition_result <- function(x, ...) {
   counts <- x$counts

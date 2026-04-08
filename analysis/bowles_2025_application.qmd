@@ -76,7 +76,17 @@ Substantively, it is a multi-arm intervention with an additional encouragement l
 
 ### Randomization process
 
-The paper describes randomization as being conducted separately within recruitment batches and within blocks of participants who were similar on pre-treatment characteristics. The blocking variables included demographics, social media use, trust in information sources, and misinformation knowledge.
+The paper and online appendix describe randomization as being conducted separately within recruitment batches and within blocks of participants who were similar on pre-treatment characteristics. The blocking variables included demographics, social media use, trust in information sources, and misinformation knowledge.
+
+The online appendix gives more detail on how those blocks were built:
+
+- participants were enrolled every two weeks in rolling batches;
+- within each batch, the authors used `blocktools`;
+- blocks were formed using a greedy Mahalanobis-distance algorithm over seven predetermined baseline covariates;
+- they first created blocks of size 38 so that treatment probabilities fit cleanly within block; and
+- they then created nested sub-blocks of size 19 inside those larger blocks.
+
+The appendix also notes that the paper's regression analyses use the larger block fixed effects of size 38, rather than the smaller sub-blocks of size 19, because attrition can leave some small sub-blocks without all treatment arms at endline.
 
 So the design is:
 
@@ -165,8 +175,6 @@ length(unique(survey_data$block_id))
 
 ## Application Strategy
 
-### Why we still simplify part of the published design
-
 The published experiment is richer than the original package interface in two ways:
 
 1. treatment assignment is multi-arm rather than binary;
@@ -220,18 +228,31 @@ attrition_summary <- app_data %>%
 kable(attrition_summary, digits = 3)
 ```
 
-This summary is useful for understanding the amount of sample loss before even turning to outcome-specific missingness.
 
-## First Outcome Application: Discernment
+## Analysis Setup
 
-The paper's headline substantive outcomes include misinformation discernment. A natural first outcome is therefore:
-
-- `end_icw_discernment`
-
-This variable is only observed for endline respondents, so attrition appears as missingness in the outcome vector.
 
 ```{r}
-discernment_result <- ri_test(
+nperm <- 1000
+set.seed(11215)
+```
+
+We will use two outcomes:
+
+- `end_icw_discernment`
+- `end_icw_treat_knowledge`
+
+For the paper comparison later on, these map to:
+
+- `Table F4`, pooled estimation, `Pooled treatment` row for discernment;
+- `Table F2`, pooled estimation, `Pooled treatment` row for treatment knowledge.
+
+## Direct Wrapper Application with `ri_test()`
+
+Before unpacking the mechanics, we first run the high-level wrapper.
+
+```{r}
+discernment_direct <- ri_test(
   Z = app_data$Z,
   Y = app_data$end_icw_discernment,
   c = 0,
@@ -239,24 +260,12 @@ discernment_result <- ri_test(
   class = "RS",
   method.list = list(name = "Wilcoxon"),
   block = app_data$block_id,
-  nperm = 5000,
-  include_ci = TRUE,
+  nperm = nperm,
+  include_ci = FALSE,
   include_twostep = FALSE
 )
 
-discernment_result
-```
-
-## Second Outcome Application: Treatment Knowledge
-
-Another natural application is:
-
-- `end_icw_treat_knowledge`
-
-This outcome is close to the intervention itself and helps illustrate how the new output object behaves on a more proximal outcome family.
-
-```{r}
-treat_knowledge_result <- ri_test(
+treat_knowledge_direct <- ri_test(
   Z = app_data$Z,
   Y = app_data$end_icw_treat_knowledge,
   c = 0,
@@ -264,98 +273,489 @@ treat_knowledge_result <- ri_test(
   class = "RS",
   method.list = list(name = "Wilcoxon"),
   block = app_data$block_id,
-  nperm = 5000,
-  include_ci = TRUE,
+  nperm = nperm,
+  include_ci = FALSE,
+  include_twostep = FALSE
+)
+```
+
+```{r}
+discernment_direct
+```
+
+```{r}
+treat_knowledge_direct
+```
+
+The rest of this note reconstructs the sharp-null result step by step using the
+lower-level functions that `ri_test()` calls internally.
+
+## Step-by-Step Walkthrough: Discernment
+
+### Prepare inputs
+
+```{r}
+discernment_Y <- app_data$end_icw_discernment
+discernment_Z <- app_data$Z
+discernment_block <- app_data$block_id
+```
+
+### Compute missingness counts with `.ri_missing_counts()`
+
+This function summarizes the total number of observations, missing outcomes,
+and attrition rates by treatment status.
+
+```{r}
+discernment_counts <- .ri_missing_counts(
+  Z = discernment_Z,
+  Y = discernment_Y
+)
+
+discernment_counts_tbl <- tibble(
+  statistic = c(
+    "Number of Obs.",
+    "Observed outcome",
+    "Missing outcome",
+    "Observed treated",
+    "Observed control",
+    "Missing treated",
+    "Missing control",
+    "Overall attrition rate",
+    "Treated attrition rate",
+    "Control attrition rate"
+  ),
+  value = c(
+    discernment_counts$n_total,
+    discernment_counts$n_obs,
+    discernment_counts$n_miss,
+    discernment_counts$n_obs_treat,
+    discernment_counts$n_obs_control,
+    discernment_counts$n_miss_treat,
+    discernment_counts$n_miss_control,
+    discernment_counts$attrition_rate_total,
+    discernment_counts$attrition_rate_treat,
+    discernment_counts$attrition_rate_control
+  )
+)
+
+kable(discernment_counts_tbl, digits = 3)
+```
+
+### Compute block diagnostics with `.ri_block_diagnostics()`
+
+Because this is a blocked experiment, we also summarize attrition patterns
+within blocks.
+
+```{r}
+discernment_block_diag <- .ri_block_diagnostics(
+  Z = discernment_Z,
+  Y = discernment_Y,
+  block = discernment_block
+)
+
+discernment_block_tbl <- tibble(
+  statistic = c(
+    "Number of blocks",
+    "Mean within-block attrition diff",
+    "Median within-block attrition diff"
+  ),
+  value = c(
+    discernment_block_diag$n_blocks,
+    discernment_block_diag$mean_within_block_attrition_diff,
+    discernment_block_diag$median_within_block_attrition_diff
+  )
+)
+
+kable(discernment_block_tbl, digits = 3)
+```
+
+### Generate blocked permutations with `.ri_default_assignments()`
+
+For `missing = "general"` and `block != NULL`, `ri_test()` delegates to
+`.ri_default_assignments()`, which in turn calls `.ri_assign_blocked()`.
+
+The key idea is:
+
+- treatment labels are permuted within each block;
+- the number treated in each block is preserved; and
+- no unit ever moves across blocks.
+
+```{r}
+set.seed(11215)
+discernment_Z_perm <- .ri_default_assignments(
+  Z = discernment_Z,
+  Y = discernment_Y,
+  missing = "general",
+  block = discernment_block,
+  nperm = nperm
+)
+
+dim(discernment_Z_perm)
+```
+
+Every permutation should preserve the total number treated:
+
+```{r}
+tibble(
+  permutation = 1:5,
+  treated_total = colSums(discernment_Z_perm[, 1:5, drop = FALSE])
+) %>%
+  kable()
+```
+
+And within selected blocks, the treated count should also be preserved:
+
+```{r}
+selected_blocks <- unique(discernment_block)[1:3]
+
+block_perm_check <- bind_rows(lapply(selected_blocks, function(b) {
+  idx <- which(discernment_block == b)
+  tibble(
+    block = as.character(b),
+    observed_treated = sum(discernment_Z[idx]),
+    perm_1 = sum(discernment_Z_perm[idx, 1]),
+    perm_2 = sum(discernment_Z_perm[idx, 2]),
+    perm_3 = sum(discernment_Z_perm[idx, 3]),
+    perm_4 = sum(discernment_Z_perm[idx, 4]),
+    perm_5 = sum(discernment_Z_perm[idx, 5])
+  )
+}))
+
+kable(block_perm_check)
+```
+
+### Build the completed outcome under the sharp null
+
+For `missing = "general"` and `c = 0`, `.ri_sharp_details()` completes the
+outcome vector in the most conservative way:
+
+- observed treated values stay as observed;
+- missing treated values become `-Inf`;
+- observed control values stay as observed; and
+- missing control values become `Inf`.
+
+This is the completed outcome vector that feeds the rank-based test statistic.
+
+```{r}
+discernment_M <- as.numeric(!is.na(discernment_Y))
+discernment_Y0_imp <- discernment_Y - discernment_Z * 0
+discernment_Y0_com_imp <- rep(NA_real_, length(discernment_Y))
+
+discernment_Y0_com_imp[discernment_Z == 1 & discernment_M == 1] <- discernment_Y0_imp[discernment_Z == 1 & discernment_M == 1]
+discernment_Y0_com_imp[discernment_Z == 1 & discernment_M == 0] <- -Inf
+discernment_Y0_com_imp[discernment_Z == 0 & discernment_M == 1] <- discernment_Y0_imp[discernment_Z == 0 & discernment_M == 1]
+discernment_Y0_com_imp[discernment_Z == 0 & discernment_M == 0] <- Inf
+
+tibble(
+  component = c(
+    "Finite observed values",
+    "Treated missing imputed to -Inf",
+    "Control missing imputed to Inf"
+  ),
+  n = c(
+    sum(is.finite(discernment_Y0_com_imp)),
+    sum(discernment_Y0_com_imp == -Inf),
+    sum(discernment_Y0_com_imp == Inf)
+  )
+) %>%
+  kable()
+```
+
+### Compute the observed test statistic with `test_stat()`
+
+With `class = "RS"` and `method.list = list(name = "Wilcoxon")`, the package
+uses a Wilcoxon rank-sum test statistic.
+
+```{r}
+discernment_stat_obs <- test_stat(
+  Z = discernment_Z,
+  Y = discernment_Y0_com_imp,
+  class = "RS",
+  method.list = list(name = "Wilcoxon")
+)
+
+discernment_stat_obs
+```
+
+### Compute the randomization distribution with `null_dist()`
+
+`null_dist()` uses the blocked permutation matrix `discernment_Z_perm` to build
+the null distribution of the same rank-sum statistic.
+
+```{r}
+discernment_stat_null <- null_dist(
+  n = length(discernment_Z),
+  m = sum(discernment_Z),
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  Z.perm = discernment_Z_perm,
+  nperm = nperm
+)
+
+summary(discernment_stat_null)
+```
+
+### Compute the randomization p-value manually
+
+For the one-sided sharp-null test implemented here, the p-value is the fraction
+of null draws that are at least as large as the observed statistic.
+
+```{r}
+discernment_p_manual <- mean(discernment_stat_null >= discernment_stat_obs)
+
+discernment_p_manual
+```
+
+### Verify the same result with `.ri_sharp_details()`
+
+`.ri_sharp_details()` bundles together the same logic: missingness counts,
+worst-case completion under the chosen assumption, the observed test statistic,
+and the sharp-null p-value.
+
+```{r}
+discernment_sharp_details <- .ri_sharp_details(
+  Z = discernment_Z,
+  Y = discernment_Y,
+  c = 0,
+  missing = "general",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  stat.null = NULL,
+  Z.perm = discernment_Z_perm,
+  nperm = nperm
+)
+
+discernment_sharp_details
+```
+
+### Compare the manual result to `ri_test()`
+
+Finally, we call `ri_test()` using the exact same permutation matrix. This lets
+us check that the wrapper is simply presenting the same calculation in a richer
+user-facing format.
+
+```{r}
+discernment_from_wrapper <- ri_test(
+  Z = discernment_Z,
+  Y = discernment_Y,
+  c = 0,
+  missing = "general",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  block = discernment_block,
+  Z.perm = discernment_Z_perm,
+  nperm = nperm,
+  include_ci = FALSE,
   include_twostep = FALSE
 )
 
-treat_knowledge_result
+discernment_comparison <- tibble(
+  quantity = c("Observed test statistic", "P-value"),
+  manual = c(discernment_stat_obs, discernment_p_manual),
+  `.ri_sharp_details()` = c(discernment_sharp_details$stat_obs, discernment_sharp_details$p_value),
+  `ri_test()` = c(
+    discernment_from_wrapper$results$`Test stat.`[1],
+    discernment_from_wrapper$results$`P-value`[1]
+  )
+)
+
+kable(discernment_comparison, digits = 3)
 ```
 
-## Manual Assumption Switching
+```{r}
+discernment_from_wrapper
+```
 
-Although the default assumption is `general`, the user can manually switch to
-other supported assumptions.
+The manual implementation, `.ri_sharp_details()`, and `ri_test()` agree exactly.
 
-- `missing = "general"`: no monotonicity restriction.
-- `missing = "mp"`: treatment weakly increases response probability.
-- `missing = "mn"`: treatment weakly decreases response probability.
+## Treatment Knowledge
 
-The printed summary now reports:
+The same function chain applies to `end_icw_treat_knowledge`. To keep the note
+readable, we use one compact helper that runs the same sequence of functions and
+stores the intermediate results.
 
-- overall attrition rate;
-- treated attrition rate; and
-- control attrition rate.
+```{r}
+run_manual_general_rs <- function(Y, Z, block, outcome_name, nperm = 1000) {
+  counts <- .ri_missing_counts(Z = Z, Y = Y)
+  block_diag <- .ri_block_diagnostics(Z = Z, Y = Y, block = block)
+  Z.perm <- .ri_default_assignments(
+    Z = Z, Y = Y, missing = "general", block = block, nperm = nperm
+  )
 
-These rates do not identify the true missingness mechanism, but they can help
-the user think about which directional assumption is more natural to inspect.
+  M <- as.numeric(!is.na(Y))
+  Y0.com.imp <- rep(NA_real_, length(Y))
+  Y0.com.imp[Z == 1 & M == 1] <- Y[Z == 1 & M == 1]
+  Y0.com.imp[Z == 1 & M == 0] <- -Inf
+  Y0.com.imp[Z == 0 & M == 1] <- Y[Z == 0 & M == 1]
+  Y0.com.imp[Z == 0 & M == 0] <- Inf
 
-For example:
+  stat_obs <- test_stat(
+    Z = Z,
+    Y = Y0.com.imp,
+    class = "RS",
+    method.list = list(name = "Wilcoxon")
+  )
 
-- if treated attrition is lower than control attrition, that is more compatible
-  with `mp` than with `mn`;
-- if treated attrition is higher than control attrition, that is more
-  compatible with `mn` than with `mp`.
+  stat_null <- null_dist(
+    n = length(Z),
+    m = sum(Z),
+    class = "RS",
+    method.list = list(name = "Wilcoxon"),
+    Z.perm = Z.perm,
+    nperm = nperm
+  )
 
-In this sense, the package should encourage users to view `mp` and `mn` as
-sensitivity-analysis assumptions rather than as assumptions chosen mechanically
-from one table.
+  p_value <- mean(stat_null >= stat_obs)
 
-## What This Application Already Suggests Should Improve in the Package
+  sharp_details <- .ri_sharp_details(
+    Z = Z,
+    Y = Y,
+    c = 0,
+    missing = "general",
+    class = "RS",
+    method.list = list(name = "Wilcoxon"),
+    stat.null = NULL,
+    Z.perm = Z.perm,
+    nperm = nperm
+  )
 
-This paper immediately reveals several places where the package should probably be improved.
+  direct <- ri_test(
+    Z = Z,
+    Y = Y,
+    c = 0,
+    missing = "general",
+    class = "RS",
+    method.list = list(name = "Wilcoxon"),
+    block = block,
+    Z.perm = Z.perm,
+    nperm = nperm,
+    include_ci = FALSE,
+    include_twostep = FALSE
+  )
 
-### 1. Blocked randomization support
+  observed_means <- tibble(
+    outcome = outcome_name,
+    mean_treated = mean(Y[Z == 1 & !is.na(Y)]),
+    mean_control = mean(Y[Z == 0 & !is.na(Y)]),
+    observed_diff = mean_treated - mean_control
+  )
 
-The paper randomized within blocks, and the original paper's regression specification also uses block fixed effects.
+  comparison <- tibble(
+    outcome = outcome_name,
+    manual_stat = stat_obs,
+    wrapper_stat = sharp_details$stat_obs,
+    ri_test_stat = direct$results$`Test stat.`[1],
+    manual_p = p_value,
+    wrapper_p = sharp_details$p_value,
+    ri_test_p = direct$results$`P-value`[1]
+  )
 
-Right now the package application above ignores that feature of the design. That is acceptable for an exploratory first pass, but it is not ideal.
+  list(
+    counts = counts,
+    block_diag = block_diag,
+    observed_means = observed_means,
+    comparison = comparison,
+    direct = direct
+  )
+}
 
-So one high-priority package improvement is:
+treat_knowledge_walkthrough <- run_manual_general_rs(
+  Y = app_data$end_icw_treat_knowledge,
+  Z = app_data$Z,
+  block = app_data$block_id,
+  outcome_name = "end_icw_treat_knowledge",
+  nperm = nperm
+)
+```
 
-- support for blocked randomization, or at least user-facing tools for running the procedure block by block or with block-aware permutation draws.
+```{r}
+kable(treat_knowledge_walkthrough$observed_means, digits = 3)
+```
 
-### 2. Multi-arm design support
+```{r}
+kable(treat_knowledge_walkthrough$comparison, digits = 3)
+```
 
-The paper's main experiment has more than two arms, plus a second encouragement layer.
+```{r}
+treat_knowledge_walkthrough$direct
+```
 
-Right now we had to simplify the design into:
+Again, the step-by-step implementation and `ri_test()` match exactly.
 
-- `Control` vs `Pooled treatment`
+## Compare to the Paper's Original Regression Tables
 
-That is a reasonable first application, but it is clearly more limited than what an applied user might want.
+The paper's corresponding regression tables are in the online appendix:
 
-So another high-priority improvement is:
+- `Table F2: Treatment knowledge`
+- `Table F4: Discernment`
 
-- a user-friendly workflow for multi-arm experiments, including built-in helpers for pairwise comparisons, pooled contrasts, or binary recodings from labeled treatment variables.
+For both tables, the relevant comparison for our first-pass binary recoding is:
 
-### 3. More automatic data diagnostics
+- section `A. Pooled estimation`;
+- row `Pooled treatment`;
+- columns `(1)` and `(2)`.
 
-A real paper application makes it obvious that users need immediate diagnostics such as:
+Column `(1)` uses block fixed effects and no additional controls, while column
+`(2)` adds LASSO-selected controls. Both are estimated on endline respondents.
 
-- treatment-arm counts;
-- endline completion rates by arm;
-- number of missing outcomes for each outcome family; and
-- warnings when the design is not a simple binary completely randomized experiment.
+```{r}
+paper_comparison <- tibble(
+  outcome = c("end_icw_treat_knowledge", "end_icw_discernment"),
+  paper_table = c(
+    "Table F2, pooled estimation, Pooled treatment, cols (1)-(2)",
+    "Table F4, pooled estimation, Pooled treatment, cols (1)-(2)"
+  ),
+  paper_coef_col1 = c(0.411, 0.058),
+  paper_coef_col2 = c(0.414, 0.063),
+  paper_p_col1 = c(0.000, 0.048),
+  paper_p_col2 = c(0.000, 0.034),
+  paper_observations = c(4543, 4543),
+  app_observed_diff = c(
+    treat_knowledge_walkthrough$observed_means$observed_diff,
+    mean(app_data$end_icw_discernment[app_data$Z == 1 & !is.na(app_data$end_icw_discernment)]) -
+      mean(app_data$end_icw_discernment[app_data$Z == 0 & !is.na(app_data$end_icw_discernment)])
+  ),
+  app_general_p = c(
+    treat_knowledge_walkthrough$direct$results$`P-value`[1],
+    discernment_from_wrapper$results$`P-value`[1]
+  ),
+  app_randomized_n = c(nrow(app_data), nrow(app_data)),
+  app_observed_outcome_n = c(
+    sum(!is.na(app_data$end_icw_treat_knowledge)),
+    sum(!is.na(app_data$end_icw_discernment))
+  )
+)
 
-The current `ri_test()` output is already better than a scalar p-value, but this application suggests that a stronger pre-analysis diagnostic layer would help a lot.
+kable(paper_comparison, digits = 3)
+```
 
-### 4. Better support for labeled data
+### Interpretation of the comparison
 
-The replication data is rich but not yet in the form most applied users would want for direct package entry. There are labeled Stata variables, multiple treatment codings, and multiple outcome families.
+For treatment knowledge:
 
-So an additional improvement would be:
+- the paper's pooled treatment coefficient is `0.411` in column `(1)` and
+  `0.414` in column `(2)` of `Table F2`;
+- our observed complete-case treated-control difference in the simplified
+  `Control` versus `Pooled treatment` sample is about `0.392`; and
+- our `ri_test()` result under `missing = "general"` gives a sharp-null
+  p-value of `1.000`.
 
-- helper functions for extracting a clean binary treatment vector and validating a chosen outcome before running inference.
+For discernment:
 
-## Bottom Line
+- the paper's pooled treatment coefficient is `0.058` in column `(1)` and
+  `0.063` in column `(2)` of `Table F4`;
+- our observed complete-case treated-control difference is about `0.059`; and
+- our `ri_test()` result under `missing = "general"` again gives a sharp-null
+  p-value of `1.000`.
 
-This paper is a strong application case for the updated package.
+The coefficient comparison and the inference
+comparison are answering different questions.
 
-It is useful precisely because it is not a perfect fit to the package's current assumptions. A clean two-arm, no-block, no-encouragement design would be easier, but it would teach us less about what applied users actually need.
-
-For a first pass, the `Control` versus `Pooled treatment` mapping is a reasonable way to use the current package. But the paper strongly suggests that the next package improvements should include:
-
-- blocked-randomization support;
-- multi-arm support; and
-- richer diagnostics before the main output table is printed.
+- The paper's regression tables condition on endline respondents, use all
+  treatment arms, and estimate OLS models with block fixed effects.
+- Our current package application keeps all randomized units in the binary
+  `Control` versus `Pooled treatment` sample and treats attrition as missing
+  potential outcomes under the user-chosen assumption.
+- Under the default `general` assumption, the sharp-null test is extremely
+  conservative because missing treated outcomes are sent to `-Inf` and missing
+  control outcomes are sent to `Inf`.
