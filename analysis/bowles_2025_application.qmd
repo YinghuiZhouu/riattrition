@@ -1,0 +1,361 @@
+---
+title: "Applying `riattrition` to Bowles et al. (2025)"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Purpose
+
+This note applies the updated `riattrition` package to:
+
+- Bowles, Jeremy, Kevin Croke, Horacio Larreguy, Shelley Liu, and John Marshall. 2025. "Sustaining Exposure to Fact-Checks: Misinformation Discernment, Media Consumption, and Its Political Implications." *American Political Science Review* 119(4): 1864-1887.
+
+
+## File Locations
+
+```{r}
+paper_pdf <- "/Users/yinghuizhou/Zotero/storage/K4VD7L2C/Bowles et al. - 2025 - Sustaining Exposure to Fact-Checks Misinformation Discernment, Media Consumption, and Its Political.pdf"
+replication_dir <- "/Users/yinghuizhou/Library/CloudStorage/Dropbox/Projects/intro_rand_inf_missing/0_paper and data survey/3_apsr_2016_2025/APSR 2021-2025/dataset_apsr_2021-2026/raw_downloads/row0018"
+package_dir <- "/Users/yinghuizhou/Library/CloudStorage/Dropbox/Projects/attrition application package/attrition application/riattrition"
+
+list(
+  paper_pdf = paper_pdf,
+  replication_dir = replication_dir,
+  package_dir = package_dir
+)
+```
+
+## Summary of the Experiment
+
+### Substantive question
+
+The paper studies whether repeated exposure to fact-checks can make people more resistant to misinformation in a real-world setting, rather than only in a one-shot survey or lab environment.
+
+The setting is South Africa, where WhatsApp is both widely used and highly relevant for the spread of political and public-health misinformation. The authors partnered with Africa Check and studied whether repeatedly sending fact-check content through WhatsApp changed participants' later ability to identify false information, their trust in media, their media behavior, and some downstream political and COVID-related attitudes.
+
+### Recruitment and sample construction
+
+The study recruited South African social media users through Facebook advertisements and then moved participants into a WhatsApp-based study workflow. Everyone first completed a baseline survey through a WhatsApp chatbot. According to the paper and replication materials:
+
+- 11,672 people completed the baseline survey.
+- 8,947 met the conditions needed to enroll in the experiment.
+- 4,543 completed the endline survey after the six-month intervention period.
+
+The paper also notes that enrolled participants were younger, more urban, more female, and more educated than the general population, but were closer to the relevant subgroup of Afrobarometer respondents who reported social media use.
+
+### What exactly was randomized?
+
+The core experimental intervention was repeated delivery of fact-check material over WhatsApp for six months.
+
+Participants were assigned to:
+
+- a pure control group that received no fact-checks; or
+- one of four fact-check treatment arms that varied how the material was delivered.
+
+The four main treatment formats were:
+
+- a short text version;
+- a short podcast;
+- a long podcast; and
+- an empathetic version of the long podcast.
+
+All treated participants received the same underlying fact-check content every two weeks for six months, but the presentation format differed across arms.
+
+### Additional cross-randomization
+
+The paper also layered a second intervention on top of the main treatment assignment. Among treated participants, most were additionally assigned to receive monthly quizzes about recent fact-check content, with financial incentives for correct performance. Others, together with the control group, received placebo quizzes about unrelated content.
+
+Substantively, it is a multi-arm intervention with an additional encouragement layer.
+
+### Randomization process
+
+The paper describes randomization as being conducted separately within recruitment batches and within blocks of participants who were similar on pre-treatment characteristics. The blocking variables included demographics, social media use, trust in information sources, and misinformation knowledge.
+
+So the design is:
+
+- individual-level randomization;
+- implemented within randomization blocks;
+- repeated across rolling recruitment batches; and
+- combined with a second randomization over quiz incentives.
+
+This matters a lot for our application because the current `riattrition` package is designed for a binary treatment and complete randomization, while this paper's design is blocked and multi-arm.
+
+### Treatment delivery
+
+Treatment delivery happened through WhatsApp broadcast lists run through Africa Check. Treated participants were sent three fact-checks every two weeks for six months. Control participants received no fact-check delivery from Africa Check.
+
+The fact-checks themselves mostly concerned false or misleading claims related to politics, public health, and social issues that had recently circulated in South Africa.
+
+### Outcome measurement
+
+At endline, the study measured:
+
+- engagement with fact-check content;
+- knowledge about treated fact-checks;
+- willingness to consume fact-checks in the future;
+- discernment between true and false stories;
+- skepticism toward conspiracy theories;
+- knowledge of verification strategies;
+- attention to social media content;
+- trust in social media and other information sources;
+- information consumption, verification, and sharing behavior; and
+- COVID-related and political attitudes and behavior.
+
+The paper's main analyses often aggregate related survey items into inverse-covariance-weighted indexes.
+
+
+## Load the Updated Package Code
+
+For this application, we directly source the updated package code from the synchronized Dropbox package folder.
+
+```{r}
+source(file.path(package_dir, "R", "0_function_sharp_null.R"))
+source(file.path(package_dir, "R", "0_function_sharp_null_twostep.R"))
+source(file.path(package_dir, "R", "1_result_output.R"))
+```
+
+## Load Replication Data
+
+```{r}
+library(dplyr)
+library(haven)
+library(knitr)
+
+survey_data <- read_dta(file.path(replication_dir, "Data", "survey_data.dta"))
+
+dim(survey_data)
+```
+
+## Replication Data Orientation
+
+The replication data already contains the variables we need for a first application:
+
+- `t0`: pooled treatment assignment
+- `t5`: disaggregated treatment assignment
+- `block_id`: randomization block
+- `in_endline`: whether the respondent completed the endline survey
+- several endline outcomes beginning with `end_icw_`
+
+```{r}
+survey_data %>%
+  transmute(
+    pooled_arm = as_factor(t0),
+    disagg_arm = as_factor(t5),
+    in_endline = in_endline
+  ) %>%
+  summarise(
+    n_total = n(),
+    n_endline = sum(in_endline == 1, na.rm = TRUE),
+    n_not_endline = sum(in_endline == 0, na.rm = TRUE)
+  )
+```
+
+```{r}
+table(as_factor(survey_data$t0), useNA = "ifany")
+table(as_factor(survey_data$t5), useNA = "ifany")
+length(unique(survey_data$block_id))
+```
+
+## Application Strategy
+
+### Why we still simplify part of the published design
+
+The published experiment is richer than the original package interface in two ways:
+
+1. treatment assignment is multi-arm rather than binary;
+2. randomization was blocked rather than complete-randomization-without-blocks.
+
+With the updated wrapper, we can now handle the blocked-randomization feature by
+supplying the block identifier to `ri_test()`. We still simplify the multi-arm
+design into a binary contrast for the first application.
+
+So for a first package application, we use this mapping:
+
+- keep only the `Control` and `Pooled treatment` arms from `t0`;
+- drop the `Placebo incentives` arm for the first application;
+- treat the result as a binary-treatment experiment;
+- preserve the original blocked randomization by passing `block_id`;
+- use `missing = "general"` as the default missingness assumption; and
+- treat this as an exploratory application intended to show where the package still needs to improve.
+
+This is not the final or ideal analysis for the paper. It is a deliberate first-pass application of the current package.
+
+### Construct a binary treatment dataset
+
+```{r}
+app_data <- survey_data %>%
+  mutate(
+    pooled_arm = as_factor(t0),
+    Z = case_when(
+      pooled_arm == "Control" ~ 0L,
+      pooled_arm == "Pooled treatment" ~ 1L,
+      TRUE ~ NA_integer_
+    )
+  ) %>%
+  filter(!is.na(Z))
+
+app_data %>%
+  count(pooled_arm)
+```
+
+## Attrition Summary for the Binary Mapping
+
+```{r}
+attrition_summary <- app_data %>%
+  group_by(pooled_arm) %>%
+  summarise(
+    n = n(),
+    endline_completed = sum(in_endline == 1, na.rm = TRUE),
+    endline_missing = sum(in_endline == 0, na.rm = TRUE),
+    endline_completion_rate = mean(in_endline == 1, na.rm = TRUE)
+  )
+
+kable(attrition_summary, digits = 3)
+```
+
+This summary is useful for understanding the amount of sample loss before even turning to outcome-specific missingness.
+
+## First Outcome Application: Discernment
+
+The paper's headline substantive outcomes include misinformation discernment. A natural first outcome is therefore:
+
+- `end_icw_discernment`
+
+This variable is only observed for endline respondents, so attrition appears as missingness in the outcome vector.
+
+```{r}
+discernment_result <- ri_test(
+  Z = app_data$Z,
+  Y = app_data$end_icw_discernment,
+  c = 0,
+  missing = "general",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  block = app_data$block_id,
+  nperm = 5000,
+  include_ci = TRUE,
+  include_twostep = FALSE
+)
+
+discernment_result
+```
+
+## Second Outcome Application: Treatment Knowledge
+
+Another natural application is:
+
+- `end_icw_treat_knowledge`
+
+This outcome is close to the intervention itself and helps illustrate how the new output object behaves on a more proximal outcome family.
+
+```{r}
+treat_knowledge_result <- ri_test(
+  Z = app_data$Z,
+  Y = app_data$end_icw_treat_knowledge,
+  c = 0,
+  missing = "general",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  block = app_data$block_id,
+  nperm = 5000,
+  include_ci = TRUE,
+  include_twostep = FALSE
+)
+
+treat_knowledge_result
+```
+
+## Manual Assumption Switching
+
+Although the default assumption is `general`, the user can manually switch to
+other supported assumptions.
+
+- `missing = "general"`: no monotonicity restriction.
+- `missing = "mp"`: treatment weakly increases response probability.
+- `missing = "mn"`: treatment weakly decreases response probability.
+
+The printed summary now reports:
+
+- overall attrition rate;
+- treated attrition rate; and
+- control attrition rate.
+
+These rates do not identify the true missingness mechanism, but they can help
+the user think about which directional assumption is more natural to inspect.
+
+For example:
+
+- if treated attrition is lower than control attrition, that is more compatible
+  with `mp` than with `mn`;
+- if treated attrition is higher than control attrition, that is more
+  compatible with `mn` than with `mp`.
+
+In this sense, the package should encourage users to view `mp` and `mn` as
+sensitivity-analysis assumptions rather than as assumptions chosen mechanically
+from one table.
+
+## What This Application Already Suggests Should Improve in the Package
+
+This paper immediately reveals several places where the package should probably be improved.
+
+### 1. Blocked randomization support
+
+The paper randomized within blocks, and the original paper's regression specification also uses block fixed effects.
+
+Right now the package application above ignores that feature of the design. That is acceptable for an exploratory first pass, but it is not ideal.
+
+So one high-priority package improvement is:
+
+- support for blocked randomization, or at least user-facing tools for running the procedure block by block or with block-aware permutation draws.
+
+### 2. Multi-arm design support
+
+The paper's main experiment has more than two arms, plus a second encouragement layer.
+
+Right now we had to simplify the design into:
+
+- `Control` vs `Pooled treatment`
+
+That is a reasonable first application, but it is clearly more limited than what an applied user might want.
+
+So another high-priority improvement is:
+
+- a user-friendly workflow for multi-arm experiments, including built-in helpers for pairwise comparisons, pooled contrasts, or binary recodings from labeled treatment variables.
+
+### 3. More automatic data diagnostics
+
+A real paper application makes it obvious that users need immediate diagnostics such as:
+
+- treatment-arm counts;
+- endline completion rates by arm;
+- number of missing outcomes for each outcome family; and
+- warnings when the design is not a simple binary completely randomized experiment.
+
+The current `ri_test()` output is already better than a scalar p-value, but this application suggests that a stronger pre-analysis diagnostic layer would help a lot.
+
+### 4. Better support for labeled data
+
+The replication data is rich but not yet in the form most applied users would want for direct package entry. There are labeled Stata variables, multiple treatment codings, and multiple outcome families.
+
+So an additional improvement would be:
+
+- helper functions for extracting a clean binary treatment vector and validating a chosen outcome before running inference.
+
+## Bottom Line
+
+This paper is a strong application case for the updated package.
+
+It is useful precisely because it is not a perfect fit to the package's current assumptions. A clean two-arm, no-block, no-encouragement design would be easier, but it would teach us less about what applied users actually need.
+
+For a first pass, the `Control` versus `Pooled treatment` mapping is a reasonable way to use the current package. But the paper strongly suggests that the next package improvements should include:
+
+- blocked-randomization support;
+- multi-arm support; and
+- richer diagnostics before the main output table is printed.

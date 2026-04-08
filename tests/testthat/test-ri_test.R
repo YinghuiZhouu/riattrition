@@ -23,3 +23,29 @@ test_that("ri_test() returns a printable applied-user result", {
   expect_true(is.numeric(out$results$`P-value`[[1]]))
   expect_invisible(print(out))
 })
+
+test_that("ri_test() supports blocked randomization summaries", {
+  Z <- c(1, 0, 1, 0, 1, 0)
+  Y <- c(2, NA, 3, 1, NA, 0)
+  block <- c("A", "A", "B", "B", "C", "C")
+
+  out <- ri_test(
+    Z = Z,
+    Y = Y,
+    c = 0,
+    missing = "general",
+    class = "RS",
+    method.list = list(name = "Wilcoxon"),
+    block = block,
+    nperm = 100,
+    include_ci = FALSE,
+    include_twostep = FALSE
+  )
+
+  expect_s3_class(out, "riattrition_result")
+  expect_equal(out$design, "blocked randomization")
+  expect_true(is.numeric(out$counts$attrition_rate_total))
+  expect_true(is.numeric(out$counts$attrition_rate_treat))
+  expect_true(is.numeric(out$counts$attrition_rate_control))
+  expect_true(is.character(out$assumption_hint))
+})

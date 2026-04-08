@@ -10,6 +10,7 @@ ri_test(
   missing = "general",
   class = "RS",
   method.list = list(name = "Wilcoxon"),
+  block = NULL,
   alternative = "two.sided",
   stat.null = NULL,
   Z.perm = NULL,
@@ -33,6 +34,9 @@ ri_test(
 \item{class}{A string that specifies the class of test statistic for the sharp-null procedure.}
 
 \item{method.list}{A list that specifies the choice of test statistic.}
+
+\item{block}{An optional block identifier vector. If supplied, permutations are
+generated within blocks while preserving the treated count in each block.}
 
 \item{alternative}{A string that specifies the direction of the confidence interval.}
 
@@ -58,8 +62,10 @@ An object of class \code{riattrition_result}.
 \description{
 \code{ri_test()} wraps the existing sharp-null attrition inference functions and
 returns a richer result object with a default printed summary. The printed
-output emphasizes missingness counts, reports the observed test statistic, and
-omits regression-style columns such as standard errors and z-statistics.
+output emphasizes missingness counts and attrition rates, reports the observed
+test statistic, and omits regression-style columns such as standard errors and
+z-statistics. If \code{block} is supplied, the wrapper uses block-respecting
+permutation draws for the randomization distribution.
 }
 \examples{
 Z <- c(1, 1, 1, 0, 0, 0)

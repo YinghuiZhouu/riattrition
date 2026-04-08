@@ -13,6 +13,9 @@
 #' @param class A string that specifies the class of test statistic for the
 #'   sharp-null procedure.
 #' @param method.list A list that specifies the choice of test statistic.
+#' @param block An optional block identifier vector. If supplied, permutations
+#'   are generated within blocks while preserving the treated count in each
+#'   block.
 #' @param alternative A string that specifies the direction of the confidence
 #'   interval.
 #' @param stat.null An optional null distribution for the sharp-null procedure.
@@ -33,6 +36,7 @@
 #' @export
 ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
                     method.list = list(name = "Wilcoxon"),
+                    block = NULL,
                     alternative = "two.sided",
                     stat.null = NULL, Z.perm = NULL, nperm = 10^4,
                     alpha = 0.05, tol = 10^(-3),
@@ -40,6 +44,12 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
                     beta = 0.1 * alpha) {
   if (is.null(include_twostep)) {
     include_twostep <- missing %in% c("general", "mp", "mn")
+  }
+
+  if (is.null(Z.perm)) {
+    Z.perm <- .ri_default_assignments(
+      Z = Z, Y = Y, missing = missing, block = block, nperm = nperm
+    )
   }
 
   sharp_details <- .ri_sharp_details(
@@ -71,7 +81,7 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
     twostep_details <- tryCatch(
       .ri_twostep_details(
         Z = Z, Y = Y, c = c, missing = missing, method.list = method.list,
-        nperm = nperm, beta = beta
+        Z.perm = Z.perm, nperm = nperm, beta = beta
       ),
       error = function(e) e
     )
@@ -82,7 +92,7 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
       twostep_ci <- .ri_safe_ci(
         fn = ci_sharp_twostep,
         Z = Z, Y = Y, alternative = alternative, missing = missing,
-        method.list = method.list, nperm = nperm, alpha = alpha,
+        method.list = method.list, Z.perm = Z.perm, nperm = nperm, alpha = alpha,
         beta = beta, tol = tol, include_ci = include_ci
       )
 
@@ -109,6 +119,8 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
       test_name = .ri_test_label(class = class, method.list = method.list),
       null_hypothesis = c,
       counts = sharp_details$counts,
+      design = if (is.null(block)) "complete randomization" else "blocked randomization",
+      assumption_hint = .ri_assumption_hint(sharp_details$counts),
       results = results,
       confidence_level = 1 - alpha,
       include_ci = include_ci,
@@ -130,6 +142,9 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   n_obs_control <- n_obs - n_obs_treat
   n_miss_treat <- sum(Z[M == 0])
   n_miss_control <- n_miss - n_miss_treat
+  attrition_rate_total <- n_miss / n_total
+  attrition_rate_treat <- n_miss_treat / n_treat
+  attrition_rate_control <- n_miss_control / n_control
 
   list(
     n_total = n_total,
@@ -140,8 +155,66 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
     n_obs_treat = n_obs_treat,
     n_obs_control = n_obs_control,
     n_miss_treat = n_miss_treat,
-    n_miss_control = n_miss_control
+    n_miss_control = n_miss_control,
+    attrition_rate_total = attrition_rate_total,
+    attrition_rate_treat = attrition_rate_treat,
+    attrition_rate_control = attrition_rate_control
   )
+}
+
+.ri_assumption_hint <- function(counts, tol = 1e-8) {
+  diff <- counts$attrition_rate_treat - counts$attrition_rate_control
+
+  if (abs(diff) <= tol) {
+    return("Observed treated and control attrition rates are very similar; rates alone do not favor mp or mn.")
+  }
+
+  if (diff < 0) {
+    return("Treated attrition is lower than control attrition; this is more consistent with mp than mn, although rates alone do not identify the missingness mechanism.")
+  }
+
+  "Treated attrition is higher than control attrition; this is more consistent with mn than mp, although rates alone do not identify the missingness mechanism."
+}
+
+.ri_default_assignments <- function(Z, Y, missing, block, nperm) {
+  M <- as.numeric(!is.na(Y))
+
+  if (missing %in% c("general", "mp", "mn")) {
+    if (is.null(block)) {
+      return(assign_CRE(length(Z), sum(Z), nperm))
+    }
+    return(.ri_assign_blocked(Z = Z, block = block, nperm = nperm))
+  }
+
+  Z.obs <- Z[M == 1]
+  if (is.null(block)) {
+    return(assign_CRE(length(Z.obs), sum(Z.obs), nperm))
+  }
+  .ri_assign_blocked(Z = Z.obs, block = block[M == 1], nperm = nperm)
+}
+
+.ri_assign_blocked <- function(Z, block, nperm) {
+  block <- as.character(block)
+  blocks <- unique(block)
+  n <- length(Z)
+  Z.perm <- matrix(0, nrow = n, ncol = nperm)
+
+  block_index <- lapply(blocks, function(b) which(block == b))
+  block_treat <- vapply(block_index, function(idx) sum(Z[idx]), numeric(1))
+
+  for (iter in seq_len(nperm)) {
+    draw <- integer(n)
+    for (j in seq_along(block_index)) {
+      idx <- block_index[[j]]
+      m <- block_treat[[j]]
+      if (m > 0) {
+        draw[sample(idx, m, replace = FALSE)] <- 1L
+      }
+    }
+    Z.perm[, iter] <- draw
+  }
+
+  Z.perm
 }
 
 .ri_test_label <- function(class, method.list) {
@@ -228,21 +301,21 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   )
 }
 
-.ri_twostep_details <- function(Z, Y, c, missing, method.list, nperm, beta) {
+.ri_twostep_details <- function(Z, Y, c, missing, method.list, Z.perm, nperm, beta) {
   if (missing == "general") {
-    return(.ri_twostep_general_details(Z, Y, c, method.list, nperm, beta))
+    return(.ri_twostep_general_details(Z, Y, c, method.list, Z.perm, nperm, beta))
   }
   if (missing == "mp") {
-    return(.ri_twostep_mp_details(Z, Y, c, method.list, nperm, beta))
+    return(.ri_twostep_mp_details(Z, Y, c, method.list, Z.perm, nperm, beta))
   }
   if (missing == "mn") {
-    return(.ri_twostep_mn_details(Z, Y, c, method.list, nperm, beta))
+    return(.ri_twostep_mn_details(Z, Y, c, method.list, Z.perm, nperm, beta))
   }
 
   stop("Two-step output is currently supported only for general, mp, and mn missingness.")
 }
 
-.ri_twostep_general_details <- function(Z, Y, c, method.list, nperm, beta) {
+.ri_twostep_general_details <- function(Z, Y, c, method.list, Z.perm, nperm, beta) {
   M <- as.numeric(!is.na(Y))
   n <- length(Z)
   n.obs <- length(Z[M == 1])
@@ -334,13 +407,13 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   }
 
   stat.obs <- min(TK.vec)
-  stat.null <- null_dist(n, n1, class = "MWU+", method.list = method.list, nperm = nperm)
+  stat.null <- null_dist(n, n1, class = "MWU+", method.list = method.list, Z.perm = Z.perm, nperm = nperm)
   p.value <- min(mean(stat.null >= stat.obs) + beta, 1)
 
   list(stat_obs = stat.obs, p_value = p.value)
 }
 
-.ri_twostep_mp_details <- function(Z, Y, c, method.list, nperm, beta) {
+.ri_twostep_mp_details <- function(Z, Y, c, method.list, Z.perm, nperm, beta) {
   M <- as.numeric(!is.na(Y))
   n <- length(Z)
   n.obs <- length(Z[M == 1])
@@ -380,14 +453,14 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   Y0.com.imp[Z == 0 & M == 1] <- Y[Z == 0 & M == 1]
   Y0.com.imp[Z == 0 & M == 0] <- Inf
 
-  stat.null <- null_dist(n, n1, class = "MWU+", method.list = method.list, nperm = nperm)
+  stat.null <- null_dist(n, n1, class = "MWU+", method.list = method.list, Z.perm = Z.perm, nperm = nperm)
   stat.obs <- test_stat(Z = Z, Y = Y0.com.imp, class = "MWU+", method.list = method.list)
   p.value <- min(mean(stat.null >= stat.obs) + beta, 1)
 
   list(stat_obs = stat.obs, p_value = p.value)
 }
 
-.ri_twostep_mn_details <- function(Z, Y, c, method.list, nperm, beta) {
+.ri_twostep_mn_details <- function(Z, Y, c, method.list, Z.perm, nperm, beta) {
   M <- as.numeric(!is.na(Y))
   n <- length(Z)
   n.obs <- length(Z[M == 1])
@@ -426,7 +499,7 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   }
   Y0.com.imp[Z == 0 & M == 0] <- -Inf
 
-  stat.null <- null_dist(n, n1, class = "MWU-", method.list = method.list, nperm = nperm)
+  stat.null <- null_dist(n, n1, class = "MWU-", method.list = method.list, Z.perm = Z.perm, nperm = nperm)
   stat.obs <- test_stat(Z = Z, Y = Y0.com.imp, class = "MWU-", method.list = method.list)
   p.value <- min(mean(stat.null >= stat.obs) + beta, 1)
 
@@ -508,7 +581,11 @@ print.riattrition_result <- function(x, ...) {
   cat(sprintf("%-22s %s\n", "Observed control", counts$n_obs_control))
   cat(sprintf("%-22s %s\n", "Missing treated", counts$n_miss_treat))
   cat(sprintf("%-22s %s\n", "Missing control", counts$n_miss_control))
+  cat(sprintf("%-22s %s\n", "Overall attrition rate", .ri_format_num(counts$attrition_rate_total)))
+  cat(sprintf("%-22s %s\n", "Treated attrition rate", .ri_format_num(counts$attrition_rate_treat)))
+  cat(sprintf("%-22s %s\n", "Control attrition rate", .ri_format_num(counts$attrition_rate_control)))
   cat(sprintf("%-22s %s\n", "Assumption", x$assumption))
+  cat(sprintf("%-22s %s\n", "Design", x$design))
   cat(sprintf("%-22s %s\n", "Test statistic", x$test_name))
   cat(sprintf("%-22s %s\n\n", "Null hypothesis", paste0("tau = ", x$null_hypothesis)))
 
@@ -532,6 +609,9 @@ print.riattrition_result <- function(x, ...) {
       cat("- ", note, "\n", sep = "")
     }
   }
+
+  cat("\nAssumption note\n", sep = "")
+  cat(x$assumption_hint, "\n", sep = "")
 
   invisible(x)
 }
