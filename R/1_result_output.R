@@ -120,6 +120,7 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
       null_hypothesis = c,
       counts = sharp_details$counts,
       design = if (is.null(block)) "complete randomization" else "blocked randomization",
+      block_diagnostics = .ri_block_diagnostics(Z = Z, Y = Y, block = block),
       assumption_hint = .ri_assumption_hint(sharp_details$counts),
       results = results,
       confidence_level = 1 - alpha,
@@ -174,6 +175,58 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   }
 
   "Treated attrition is higher than control attrition; this is more consistent with mn than mp, although rates alone do not identify the missingness mechanism."
+}
+
+.ri_block_diagnostics <- function(Z, Y, block) {
+  if (is.null(block)) {
+    return(NULL)
+  }
+
+  block <- as.character(block)
+  M <- as.numeric(!is.na(Y))
+  blocks <- unique(block)
+
+  block_table <- data.frame(
+    block = blocks,
+    n = NA_integer_,
+    treated_n = NA_integer_,
+    control_n = NA_integer_,
+    treated_attrition_rate = NA_real_,
+    control_attrition_rate = NA_real_,
+    attrition_diff = NA_real_,
+    stringsAsFactors = FALSE
+  )
+
+  for (i in seq_along(blocks)) {
+    b <- blocks[[i]]
+    idx <- which(block == b)
+    Zb <- Z[idx]
+    Mb <- M[idx]
+
+    treated_n <- sum(Zb == 1)
+    control_n <- sum(Zb == 0)
+    treated_missing <- sum(Zb == 1 & Mb == 0)
+    control_missing <- sum(Zb == 0 & Mb == 0)
+
+    treated_rate <- if (treated_n > 0) treated_missing / treated_n else NA_real_
+    control_rate <- if (control_n > 0) control_missing / control_n else NA_real_
+
+    block_table$n[i] <- length(idx)
+    block_table$treated_n[i] <- treated_n
+    block_table$control_n[i] <- control_n
+    block_table$treated_attrition_rate[i] <- treated_rate
+    block_table$control_attrition_rate[i] <- control_rate
+    block_table$attrition_diff[i] <- treated_rate - control_rate
+  }
+
+  valid_diff <- block_table$attrition_diff[!is.na(block_table$attrition_diff)]
+
+  list(
+    n_blocks = length(blocks),
+    mean_within_block_attrition_diff = mean(valid_diff),
+    median_within_block_attrition_diff = stats::median(valid_diff),
+    block_table = block_table
+  )
 }
 
 .ri_default_assignments <- function(Z, Y, missing, block, nperm) {
@@ -588,6 +641,17 @@ print.riattrition_result <- function(x, ...) {
   cat(sprintf("%-22s %s\n", "Design", x$design))
   cat(sprintf("%-22s %s\n", "Test statistic", x$test_name))
   cat(sprintf("%-22s %s\n\n", "Null hypothesis", paste0("tau = ", x$null_hypothesis)))
+
+  if (!is.null(x$block_diagnostics)) {
+    cat("Block diagnostics\n", sep = "")
+    cat(sprintf("%-34s %s\n", "Number of blocks", x$block_diagnostics$n_blocks))
+    cat(sprintf("%-34s %s\n",
+                "Mean within-block attrition diff",
+                .ri_format_num(x$block_diagnostics$mean_within_block_attrition_diff)))
+    cat(sprintf("%-34s %s\n\n",
+                "Median within-block attrition diff",
+                .ri_format_num(x$block_diagnostics$median_within_block_attrition_diff)))
+  }
 
   cat(strrep("=", 72), "\n", sep = "")
   cat(sprintf("%-14s %-12s %-12s %-28s\n",

@@ -65,7 +65,8 @@ returns a richer result object with a default printed summary. The printed
 output emphasizes missingness counts and attrition rates, reports the observed
 test statistic, and omits regression-style columns such as standard errors and
 z-statistics. If \code{block} is supplied, the wrapper uses block-respecting
-permutation draws for the randomization distribution.
+permutation draws for the randomization distribution and reports simple
+block-level attrition diagnostics in the printed output.
 }
 \examples{
 Z <- c(1, 1, 1, 0, 0, 0)

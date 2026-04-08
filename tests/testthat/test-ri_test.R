@@ -48,4 +48,8 @@ test_that("ri_test() supports blocked randomization summaries", {
   expect_true(is.numeric(out$counts$attrition_rate_treat))
   expect_true(is.numeric(out$counts$attrition_rate_control))
   expect_true(is.character(out$assumption_hint))
+  expect_equal(out$block_diagnostics$n_blocks, 3)
+  expect_true(is.numeric(out$block_diagnostics$mean_within_block_attrition_diff))
+  expect_true(is.numeric(out$block_diagnostics$median_within_block_attrition_diff))
+  expect_equal(nrow(out$block_diagnostics$block_table), 3)
 })
