@@ -1,9 +1,10 @@
 % Generated manually for applied-user output wrapper
-\name{ri_test}
+\name{ri_sharp_attrition}
+\alias{ri_sharp_attrition}
 \alias{ri_test}
 \title{Applied-user wrapper for attrition inference output}
 \usage{
-ri_test(
+ri_sharp_attrition(
   Z,
   Y,
   c = 0,
@@ -11,6 +12,10 @@ ri_test(
   class = "RS",
   method.list = list(name = "Wilcoxon"),
   block = NULL,
+  block_missing_sum = FALSE,
+  cluster = NULL,
+  cluster_outcome = "mean_observed",
+  cluster_missing = "all_missing",
   alternative = "two.sided",
   stat.null = NULL,
   Z.perm = NULL,
@@ -38,6 +43,22 @@ ri_test(
 \item{block}{An optional block identifier vector. If supplied, permutations are
 generated within blocks while preserving the treated count in each block.}
 
+\item{block_missing_sum}{A logical value indicating whether the printed block
+missingness section should include additional summaries beyond the default
+two-line display.}
+
+\item{cluster}{An optional cluster identifier vector. If supplied, the analysis
+treats clusters as the unit of analysis.}
+
+\item{cluster_outcome}{A string that specifies how individual outcomes are
+aggregated to the cluster level. Currently only \code{"mean_observed"} is
+supported.}
+
+\item{cluster_missing}{A string that specifies when the cluster-level outcome is
+missing. \code{"all_missing"} treats a cluster as missing only if all
+individual outcomes are missing. \code{"any_missing"} treats a cluster as
+missing if any individual outcome is missing.}
+
 \item{alternative}{A string that specifies the direction of the confidence interval.}
 
 \item{stat.null}{An optional null distribution for the sharp-null procedure.}
@@ -60,18 +81,20 @@ generated within blocks while preserving the treated count in each block.}
 An object of class \code{riattrition_result}.
 }
 \description{
-\code{ri_test()} wraps the existing sharp-null attrition inference functions and
-returns a richer result object with a default printed summary. The printed
-output emphasizes missingness counts and attrition rates, reports the observed
-test statistic, and omits regression-style columns such as standard errors and
-z-statistics. If \code{block} is supplied, the wrapper uses block-respecting
-permutation draws for the randomization distribution and reports simple
-block-level attrition diagnostics in the printed output.
+\code{ri_sharp_attrition()} wraps the existing sharp-null attrition inference
+functions and returns a richer result object with a default printed summary.
+The printed output emphasizes missingness counts and attrition rates, reports
+the observed test statistic, and omits regression-style columns such as
+standard errors and z-statistics. If \code{block} is supplied, the wrapper
+uses block-respecting permutation draws for the randomization distribution and
+reports simple block-level attrition diagnostics in the printed output.
+If \code{cluster} is supplied, individual-level data are first aggregated to
+cluster-level outcomes, and inference treats clusters as the unit of analysis.
 }
 \examples{
 Z <- c(1, 1, 1, 0, 0, 0)
 Y <- c(NA, 8, 6, 3, 4, NA)
-out <- ri_test(
+out <- ri_sharp_attrition(
   Z = Z, Y = Y, c = 0, missing = "general",
   class = "RS", method.list = list(name = "Wilcoxon"),
   nperm = 200, include_ci = FALSE, include_twostep = FALSE

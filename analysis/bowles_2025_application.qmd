@@ -181,7 +181,7 @@ The published experiment is richer than the original package interface in two wa
 2. randomization was blocked rather than complete-randomization-without-blocks.
 
 With the updated wrapper, we can now handle the blocked-randomization feature by
-supplying the block identifier to `ri_test()`. We still simplify the multi-arm
+supplying the block identifier to `ri_sharp_attrition()`. We still simplify the multi-arm
 design into a binary contrast for the first application.
 
 So for a first package application, we use this mapping:
@@ -247,12 +247,12 @@ For the paper comparison later on, these map to:
 - `Table F4`, pooled estimation, `Pooled treatment` row for discernment;
 - `Table F2`, pooled estimation, `Pooled treatment` row for treatment knowledge.
 
-## Direct Wrapper Application with `ri_test()`
+## Direct Wrapper Application with `ri_sharp_attrition()`
 
 Before unpacking the mechanics, we first run the high-level wrapper.
 
 ```{r}
-discernment_direct <- ri_test(
+discernment_direct <- ri_sharp_attrition(
   Z = app_data$Z,
   Y = app_data$end_icw_discernment,
   c = 0,
@@ -261,11 +261,10 @@ discernment_direct <- ri_test(
   method.list = list(name = "Wilcoxon"),
   block = app_data$block_id,
   nperm = nperm,
-  include_ci = FALSE,
   include_twostep = FALSE
 )
 
-treat_knowledge_direct <- ri_test(
+treat_knowledge_direct <- ri_sharp_attrition(
   Z = app_data$Z,
   Y = app_data$end_icw_treat_knowledge,
   c = 0,
@@ -274,7 +273,6 @@ treat_knowledge_direct <- ri_test(
   method.list = list(name = "Wilcoxon"),
   block = app_data$block_id,
   nperm = nperm,
-  include_ci = FALSE,
   include_twostep = FALSE
 )
 ```
@@ -287,8 +285,62 @@ discernment_direct
 treat_knowledge_direct
 ```
 
+## Sensitivity Check: `missing = "mn"`
+
+Because the treated attrition rate is slightly higher than the control
+attrition rate in this application, `mn` is a natural directional sensitivity
+assumption to inspect.
+
+Here we rerun the discernment outcome under `missing = "mn"` so that we can
+compare the printed output directly to the default `general` case.
+
+```{r}
+discernment_mn <- ri_sharp_attrition(
+  Z = app_data$Z,
+  Y = app_data$end_icw_discernment,
+  c = 0,
+  missing = "mn",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  block = app_data$block_id,
+  block_missing_sum = TRUE,
+  nperm = nperm,
+  include_ci = TRUE,
+  include_twostep = FALSE
+)
+```
+
+```{r}
+discernment_mn
+```
+
+Notice that `ri_sharp_attrition()` always reports the `general` row first. When
+the user requests `missing = "mn"`, the table adds a second row for `mn`
+underneath the default `general` result.
+
+```{r}
+mn_comparison <- bind_rows(
+  discernment_direct$results %>%
+    mutate(output_call = "general only"),
+  discernment_mn$results %>%
+    mutate(output_call = "missing = mn")
+) %>%
+  select(
+    output_call,
+    `Missingness assumption`,
+    Method,
+    `Test stat.`,
+    `Test stat. value`,
+    `P-value`,
+    `CI lower`,
+    `CI upper`
+  )
+
+kable(mn_comparison, digits = 3)
+```
+
 The rest of this note reconstructs the sharp-null result step by step using the
-lower-level functions that `ri_test()` calls internally.
+lower-level functions that `ri_sharp_attrition()` calls internally.
 
 ## Step-by-Step Walkthrough: Discernment
 
@@ -371,7 +423,7 @@ kable(discernment_block_tbl, digits = 3)
 
 ### Generate blocked permutations with `.ri_default_assignments()`
 
-For `missing = "general"` and `block != NULL`, `ri_test()` delegates to
+For `missing = "general"` and `block != NULL`, `ri_sharp_attrition()` delegates to
 `.ri_default_assignments()`, which in turn calls `.ri_assign_blocked()`.
 
 The key idea is:
@@ -528,14 +580,14 @@ discernment_sharp_details <- .ri_sharp_details(
 discernment_sharp_details
 ```
 
-### Compare the manual result to `ri_test()`
+### Compare the manual result to `ri_sharp_attrition()`
 
-Finally, we call `ri_test()` using the exact same permutation matrix. This lets
+Finally, we call `ri_sharp_attrition()` using the exact same permutation matrix. This lets
 us check that the wrapper is simply presenting the same calculation in a richer
 user-facing format.
 
 ```{r}
-discernment_from_wrapper <- ri_test(
+discernment_from_wrapper <- ri_sharp_attrition(
   Z = discernment_Z,
   Y = discernment_Y,
   c = 0,
@@ -553,7 +605,7 @@ discernment_comparison <- tibble(
   quantity = c("Observed test statistic", "P-value"),
   manual = c(discernment_stat_obs, discernment_p_manual),
   `.ri_sharp_details()` = c(discernment_sharp_details$stat_obs, discernment_sharp_details$p_value),
-  `ri_test()` = c(
+  `ri_sharp_attrition()` = c(
     discernment_from_wrapper$results$`Test stat.`[1],
     discernment_from_wrapper$results$`P-value`[1]
   )
@@ -566,7 +618,7 @@ kable(discernment_comparison, digits = 3)
 discernment_from_wrapper
 ```
 
-The manual implementation, `.ri_sharp_details()`, and `ri_test()` agree exactly.
+The manual implementation, `.ri_sharp_details()`, and `ri_sharp_attrition()` agree exactly.
 
 ## Treatment Knowledge
 
@@ -619,7 +671,7 @@ run_manual_general_rs <- function(Y, Z, block, outcome_name, nperm = 1000) {
     nperm = nperm
   )
 
-  direct <- ri_test(
+  direct <- ri_sharp_attrition(
     Z = Z,
     Y = Y,
     c = 0,
@@ -680,7 +732,7 @@ kable(treat_knowledge_walkthrough$comparison, digits = 3)
 treat_knowledge_walkthrough$direct
 ```
 
-Again, the step-by-step implementation and `ri_test()` match exactly.
+Again, the step-by-step implementation and `ri_sharp_attrition()` match exactly.
 
 ## Compare to the Paper's Original Regression Tables
 
@@ -737,7 +789,7 @@ For treatment knowledge:
   `0.414` in column `(2)` of `Table F2`;
 - our observed complete-case treated-control difference in the simplified
   `Control` versus `Pooled treatment` sample is about `0.392`; and
-- our `ri_test()` result under `missing = "general"` gives a sharp-null
+- our `ri_sharp_attrition()` result under `missing = "general"` gives a sharp-null
   p-value of `1.000`.
 
 For discernment:
@@ -745,7 +797,7 @@ For discernment:
 - the paper's pooled treatment coefficient is `0.058` in column `(1)` and
   `0.063` in column `(2)` of `Table F4`;
 - our observed complete-case treated-control difference is about `0.059`; and
-- our `ri_test()` result under `missing = "general"` again gives a sharp-null
+- our `ri_sharp_attrition()` result under `missing = "general"` again gives a sharp-null
   p-value of `1.000`.
 
 The coefficient comparison and the inference

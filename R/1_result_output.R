@@ -14,7 +14,7 @@
 #       - psi(), uci(), etc.
 #   * This file: applied-user interface and presentation logic
 #       - richer result object
-#       - blocked-randomization helper for permutations
+#       - blocked-randomization / cluster-randomization helpers
 #       - missingness/block diagnostics
 #       - print()/summary() methods
 #
@@ -25,11 +25,11 @@
 #
 #' Attrition inference result for applied users
 #'
-#' `ri_test()` wraps the existing sharp-null attrition inference functions and
-#' returns a richer result object with a default printed summary. The printed
-#' output emphasizes general missingness by default, reports the observed test
-#' statistic, and omits regression-style columns such as standard errors and
-#' z-statistics.
+#' `ri_sharp_attrition()` wraps the existing sharp-null attrition inference
+#' functions and returns a richer result object with a default printed summary.
+#' The printed output emphasizes general missingness by default, reports the
+#' observed test statistic, and omits regression-style columns such as standard
+#' errors and z-statistics.
 #'
 #' @param Z Treatment assignment (\eqn{n \times 1} vector).
 #' @param Y Observed outcome (\eqn{n \times 1} vector, including `NA`s).
@@ -41,6 +41,18 @@
 #' @param block An optional block identifier vector. If supplied, permutations
 #'   are generated within blocks while preserving the treated count in each
 #'   block.
+#' @param block_missing_sum A logical value indicating whether the printed block
+#'   missingness section should include additional summaries beyond the default
+#'   two-line display.
+#' @param cluster An optional cluster identifier vector. If supplied, the
+#'   analysis treats clusters as the unit of analysis.
+#' @param cluster_outcome A string that specifies how individual outcomes are
+#'   aggregated to the cluster level. Currently only `"mean_observed"` is
+#'   supported.
+#' @param cluster_missing A string that specifies when the cluster-level outcome
+#'   is missing. `"all_missing"` treats a cluster as missing only if all
+#'   individual outcomes are missing. `"any_missing"` treats a cluster as
+#'   missing if any individual outcome is missing.
 #' @param alternative A string that specifies the direction of the confidence
 #'   interval.
 #' @param stat.null An optional null distribution for the sharp-null procedure.
@@ -59,99 +71,141 @@
 #'
 #' @return An object of class `riattrition_result`.
 #' @export
-ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
-                    method.list = list(name = "Wilcoxon"),
-                    block = NULL,
-                    alternative = "two.sided",
-                    stat.null = NULL, Z.perm = NULL, nperm = 10^4,
-                    alpha = 0.05, tol = 10^(-3),
-                    include_ci = TRUE, include_twostep = NULL,
-                    beta = 0.1 * alpha) {
+ri_sharp_attrition <- function(Z, Y, c = 0, missing = "general", class = "RS",
+                               method.list = list(name = "Wilcoxon"),
+                               block = NULL,
+                               block_missing_sum = FALSE,
+                               cluster = NULL,
+                               cluster_outcome = "mean_observed",
+                               cluster_missing = "all_missing",
+                               alternative = "two.sided",
+                               stat.null = NULL, Z.perm = NULL, nperm = 10^4,
+                               alpha = 0.05, tol = 10^(-3),
+                               include_ci = TRUE, include_twostep = NULL,
+                               beta = 0.1 * alpha) {
+  analysis_data <- .ri_prepare_analysis_data(
+    Z = Z, Y = Y, block = block, cluster = cluster,
+    cluster_outcome = cluster_outcome, cluster_missing = cluster_missing
+  )
+  Z.analysis <- analysis_data$Z
+  Y.analysis <- analysis_data$Y
+  block.analysis <- analysis_data$block
+
+  assumptions_reported <- unique(c("general", missing))
+  counts <- .ri_missing_counts(Z.analysis, Y.analysis)
+  block_diagnostics <- .ri_block_diagnostics(Z = Z.analysis, Y = Y.analysis, block = block.analysis)
+  test_name <- .ri_test_label(class = class, method.list = method.list)
+  notes <- character(0)
+
   # By default, include the two-step procedure only for the missingness
   # assumptions for which the package currently has dedicated support.
   if (is.null(include_twostep)) {
     include_twostep <- missing %in% c("general", "mp", "mn")
   }
 
-  # The original package expects a permutation matrix Z.perm.  If the user does
-  # not supply one, we construct it here using either:
-  #   * complete randomization (assign_CRE() from 0_function_sharp_null.R), or
-  #   * blocked randomization (.ri_assign_blocked(), added in this file).
-  if (is.null(Z.perm)) {
-    Z.perm <- .ri_default_assignments(
-      Z = Z, Y = Y, missing = missing, block = block, nperm = nperm
+  if (length(assumptions_reported) > 1 && (!is.null(Z.perm) || !is.null(stat.null))) {
+    notes <- c(
+      notes,
+      "Custom stat.null/Z.perm inputs were not reused across multiple assumption rows; each row was recomputed with its own design-compatible permutation inputs."
     )
   }
 
-  # Sharp-null details are calculated by a wrapper defined below, but that
-  # wrapper delegates the core rank-based calculations to:
-  #   * null_dist()   from 0_function_sharp_null.R
-  #   * test_stat()   from 0_function_sharp_null.R
-  sharp_details <- .ri_sharp_details(
-    Z = Z, Y = Y, c = c, missing = missing, class = class,
-    method.list = method.list, stat.null = stat.null, Z.perm = Z.perm, nperm = nperm
-  )
+  results_list <- vector("list", length = 0)
 
-  # Confidence intervals are still computed by the original package function
-  # ci_sharp(); .ri_safe_ci() is only a small convenience wrapper that turns
-  # failures into NA rather than interrupting printing.
-  sharp_ci <- .ri_safe_ci(
-    fn = ci_sharp,
-    Z = Z, Y = Y, alternative = alternative, missing = missing,
-    class = class, method.list = method.list, stat.null = stat.null,
-    Z.perm = Z.perm, nperm = nperm, alpha = alpha, tol = tol,
-    include_ci = include_ci
-  )
+  for (assumption_i in assumptions_reported) {
+    # The original package expects a permutation matrix Z.perm.  If the user
+    # does not supply one, we construct it here using either:
+    #   * complete randomization (assign_CRE() from 0_function_sharp_null.R), or
+    #   * blocked randomization (.ri_assign_blocked(), added in this file).
+    Z.perm_i <- if (length(assumptions_reported) == 1 && !is.null(Z.perm)) {
+      Z.perm
+    } else {
+      .ri_default_assignments(
+        Z = Z.analysis, Y = Y.analysis, missing = assumption_i,
+        block = block.analysis, nperm = nperm
+      )
+    }
 
-  results <- data.frame(
-    Method = "Sharp-null",
-    `Test stat.` = sharp_details$stat_obs,
-    `P-value` = sharp_details$p_value,
-    `CI lower` = sharp_ci$lower,
-    `CI upper` = sharp_ci$upper,
-    stringsAsFactors = FALSE,
-    check.names = FALSE
-  )
+    stat.null_i <- if (length(assumptions_reported) == 1 && !is.null(stat.null)) {
+      stat.null
+    } else {
+      NULL
+    }
 
-  notes <- character(0)
-
-  if (include_twostep) {
-    # The "two-step" row is optional.  The complicated identification argument
-    # still lives in the original / legacy codebase; this file only standardizes
-    # the resulting output so it looks parallel to the sharp-null row.
-    twostep_details <- tryCatch(
-      .ri_twostep_details(
-        Z = Z, Y = Y, c = c, missing = missing, method.list = method.list,
-        Z.perm = Z.perm, nperm = nperm, beta = beta
-      ),
-      error = function(e) e
+    # Sharp-null details are calculated by a wrapper defined below, but that
+    # wrapper delegates the core rank-based calculations to:
+    #   * null_dist()   from 0_function_sharp_null.R
+    #   * test_stat()   from 0_function_sharp_null.R
+    sharp_details <- .ri_sharp_details(
+      Z = Z.analysis, Y = Y.analysis, c = c, missing = assumption_i, class = class,
+      method.list = method.list, stat.null = stat.null_i, Z.perm = Z.perm_i,
+      nperm = nperm
     )
 
-    if (inherits(twostep_details, "error")) {
-      notes <- c(notes, paste("Two-step output not added:", conditionMessage(twostep_details)))
-    } else {
-      # ci_sharp_twostep() is defined in 0_function_sharp_null_twostep.R.
-      twostep_ci <- .ri_safe_ci(
-        fn = ci_sharp_twostep,
-        Z = Z, Y = Y, alternative = alternative, missing = missing,
-        method.list = method.list, Z.perm = Z.perm, nperm = nperm, alpha = alpha,
-        beta = beta, tol = tol, include_ci = include_ci
+    # Confidence intervals are still computed by the original package function
+    # ci_sharp(); .ri_safe_ci() is only a small convenience wrapper that turns
+    # failures into NA rather than interrupting printing.
+    sharp_ci <- .ri_safe_ci(
+      fn = ci_sharp,
+      Z = Z.analysis, Y = Y.analysis, alternative = alternative, missing = assumption_i,
+      class = class, method.list = method.list, stat.null = stat.null_i,
+      Z.perm = Z.perm_i, nperm = nperm, alpha = alpha, tol = tol,
+      include_ci = include_ci
+    )
+
+    results_list[[length(results_list) + 1]] <- data.frame(
+      `Missingness assumption` = assumption_i,
+      Method = "Sharp-null",
+      `Test stat.` = test_name,
+      `Test stat. value` = sharp_details$stat_obs,
+      `P-value` = sharp_details$p_value,
+      `CI lower` = sharp_ci$lower,
+      `CI upper` = sharp_ci$upper,
+      stringsAsFactors = FALSE,
+      check.names = FALSE
+    )
+
+    if (include_twostep && assumption_i %in% c("general", "mp", "mn")) {
+      # The "two-step" row is optional.  The complicated identification
+      # argument still lives in the original / legacy codebase; this file only
+      # standardizes the resulting output so it looks parallel to the
+      # sharp-null row.
+      twostep_details <- tryCatch(
+        .ri_twostep_details(
+          Z = Z.analysis, Y = Y.analysis, c = c, missing = assumption_i,
+          method.list = method.list,
+          Z.perm = Z.perm_i, nperm = nperm, beta = beta
+        ),
+        error = function(e) e
       )
 
-      results <- rbind(
-        results,
-        data.frame(
+      if (inherits(twostep_details, "error")) {
+        notes <- c(notes, paste("Two-step output not added for", assumption_i, ":", conditionMessage(twostep_details)))
+      } else {
+        # ci_sharp_twostep() is defined in 0_function_sharp_null_twostep.R.
+        twostep_ci <- .ri_safe_ci(
+          fn = ci_sharp_twostep,
+          Z = Z.analysis, Y = Y.analysis, alternative = alternative, missing = assumption_i,
+          method.list = method.list, Z.perm = Z.perm_i, nperm = nperm,
+          alpha = alpha, beta = beta, tol = tol, include_ci = include_ci
+        )
+
+        results_list[[length(results_list) + 1]] <- data.frame(
+          `Missingness assumption` = assumption_i,
           Method = "Two-step",
-          `Test stat.` = twostep_details$stat_obs,
+          `Test stat.` = .ri_twostep_test_label(missing = assumption_i, method.list = method.list),
+          `Test stat. value` = twostep_details$stat_obs,
           `P-value` = twostep_details$p_value,
           `CI lower` = twostep_ci$lower,
           `CI upper` = twostep_ci$upper,
           stringsAsFactors = FALSE,
           check.names = FALSE
         )
-      )
+      }
     }
   }
+
+  results <- do.call(rbind, results_list)
 
   # Return a richer S3 object than the original scalar p-value interface.  The
   # actual inferential content is unchanged; we are just storing enough metadata
@@ -160,13 +214,19 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
     list(
       call = match.call(),
       assumption = missing,
+      assumptions_reported = assumptions_reported,
       test_class = class,
-      test_name = .ri_test_label(class = class, method.list = method.list),
+      test_name = test_name,
       null_hypothesis = c,
-      counts = sharp_details$counts,
-      design = if (is.null(block)) "complete randomization" else "blocked randomization",
-      block_diagnostics = .ri_block_diagnostics(Z = Z, Y = Y, block = block),
-      assumption_hint = .ri_assumption_hint(sharp_details$counts),
+      counts = counts,
+      design = analysis_data$design,
+      inference_unit = analysis_data$inference_unit,
+      cluster_outcome = analysis_data$cluster_outcome,
+      cluster_missing = analysis_data$cluster_missing,
+      cluster_diagnostics = analysis_data$cluster_diagnostics,
+      block_diagnostics = block_diagnostics,
+      block_missing_sum = block_missing_sum,
+      assumption_hint = .ri_assumption_hint(counts),
       results = results,
       confidence_level = 1 - alpha,
       include_ci = include_ci,
@@ -174,6 +234,157 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
       notes = notes
     ),
     class = "riattrition_result"
+  )
+}
+
+# Backward-compatible alias.  The preferred user-facing function name is now
+# ri_sharp_attrition().
+ri_test <- ri_sharp_attrition
+
+#----------- New helper: choose individual- vs cluster-level analysis ---------#
+#
+# If cluster is NULL, the package behaves exactly as before.  If cluster is
+# supplied, this helper converts individual-level inputs into cluster-level
+# vectors and all downstream inference treats clusters as the units.
+.ri_prepare_analysis_data <- function(Z, Y, block, cluster,
+                                      cluster_outcome = "mean_observed",
+                                      cluster_missing = "all_missing") {
+  if (is.null(cluster)) {
+    return(list(
+      Z = Z,
+      Y = Y,
+      block = block,
+      design = if (is.null(block)) "complete randomization" else "blocked randomization",
+      inference_unit = "individual",
+      cluster_outcome = NULL,
+      cluster_missing = NULL,
+      cluster_diagnostics = NULL
+    ))
+  }
+
+  cluster_data <- .ri_cluster_data(
+    Z = Z, Y = Y, block = block, cluster = cluster,
+    cluster_outcome = cluster_outcome, cluster_missing = cluster_missing
+  )
+
+  list(
+    Z = cluster_data$Z,
+    Y = cluster_data$Y,
+    block = cluster_data$block,
+    design = if (is.null(cluster_data$block)) "cluster randomization" else "blocked cluster randomization",
+    inference_unit = "cluster",
+    cluster_outcome = cluster_outcome,
+    cluster_missing = cluster_missing,
+    cluster_diagnostics = .ri_cluster_diagnostics(cluster_data)
+  )
+}
+
+#----------- New helper: aggregate individual data to cluster level -----------#
+#
+# Default behavior follows common cluster-trial practice:
+#   * cluster_outcome = "mean_observed": cluster outcome is the mean among
+#     observed individual outcomes in that cluster.
+#   * cluster_missing = "all_missing": cluster outcome is missing only if the
+#     cluster has no observed individual outcomes.
+#
+# The sensitivity option cluster_missing = "any_missing" treats a cluster as
+# missing whenever any individual outcome in that cluster is missing.
+.ri_cluster_data <- function(Z, Y, block, cluster,
+                             cluster_outcome = "mean_observed",
+                             cluster_missing = "all_missing") {
+  if (!cluster_outcome %in% "mean_observed") {
+    stop("Currently, cluster_outcome must be 'mean_observed'.")
+  }
+  if (!cluster_missing %in% c("all_missing", "any_missing")) {
+    stop("cluster_missing must be 'all_missing' or 'any_missing'.")
+  }
+  if (length(cluster) != length(Z) || length(Y) != length(Z)) {
+    stop("Z, Y, and cluster must have the same length.")
+  }
+  if (!is.null(block) && length(block) != length(Z)) {
+    stop("block must have the same length as Z when supplied.")
+  }
+
+  cluster_chr <- as.character(cluster)
+  clusters <- unique(cluster_chr)
+
+  cluster_table <- data.frame(
+    cluster = clusters,
+    n_individuals = NA_integer_,
+    n_observed = NA_integer_,
+    n_missing = NA_integer_,
+    response_rate = NA_real_,
+    Z = NA_real_,
+    Y = NA_real_,
+    block = if (is.null(block)) NA_character_ else NA_character_,
+    stringsAsFactors = FALSE
+  )
+
+  for (i in seq_along(clusters)) {
+    cl <- clusters[[i]]
+    idx <- which(cluster_chr == cl)
+    Zi <- unique(stats::na.omit(Z[idx]))
+    if (length(Zi) != 1) {
+      stop("Treatment assignment must be constant within each cluster.")
+    }
+
+    if (!is.null(block)) {
+      bi <- unique(stats::na.omit(as.character(block[idx])))
+      if (length(bi) != 1) {
+        stop("Block assignment must be constant within each cluster when block is supplied.")
+      }
+      cluster_table$block[i] <- bi[[1]]
+    }
+
+    Yi <- Y[idx]
+    n_individuals <- length(idx)
+    n_observed <- sum(!is.na(Yi))
+    n_missing <- n_individuals - n_observed
+    response_rate <- n_observed / n_individuals
+
+    cluster_y <- if (n_observed > 0) mean(Yi, na.rm = TRUE) else NA_real_
+    if (cluster_missing == "any_missing" && n_missing > 0) {
+      cluster_y <- NA_real_
+    }
+
+    cluster_table$n_individuals[i] <- n_individuals
+    cluster_table$n_observed[i] <- n_observed
+    cluster_table$n_missing[i] <- n_missing
+    cluster_table$response_rate[i] <- response_rate
+    cluster_table$Z[i] <- Zi[[1]]
+    cluster_table$Y[i] <- cluster_y
+  }
+
+  list(
+    Z = cluster_table$Z,
+    Y = cluster_table$Y,
+    block = if (is.null(block)) NULL else cluster_table$block,
+    cluster_table = cluster_table,
+    n_individuals = length(Z),
+    n_clusters = length(clusters),
+    cluster_outcome = cluster_outcome,
+    cluster_missing = cluster_missing
+  )
+}
+
+#----------- New helper: cluster-level diagnostics ---------------------------#
+#
+# These diagnostics describe individual-level missingness inside randomized
+# clusters.  They do not alter the cluster-level inference; they help users see
+# how the cluster-level outcome was constructed.
+.ri_cluster_diagnostics <- function(cluster_data) {
+  tab <- cluster_data$cluster_table
+
+  list(
+    n_individuals = cluster_data$n_individuals,
+    n_clusters = cluster_data$n_clusters,
+    mean_cluster_size = mean(tab$n_individuals),
+    median_cluster_size = stats::median(tab$n_individuals),
+    mean_cluster_response_rate = mean(tab$response_rate),
+    median_cluster_response_rate = stats::median(tab$response_rate),
+    clusters_with_no_observed_outcome = sum(tab$n_observed == 0),
+    clusters_with_any_missing = sum(tab$n_missing > 0),
+    cluster_table = tab
   )
 }
 
@@ -281,13 +492,22 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   }
 
   valid_diff <- block_table$attrition_diff[!is.na(block_table$attrition_diff)]
+  q <- if (length(valid_diff) > 0) {
+    stats::quantile(valid_diff, probs = c(0.25, 0.5, 0.75), names = FALSE)
+  } else {
+    c(NA_real_, NA_real_, NA_real_)
+  }
 
   list(
     n_blocks = length(blocks),
     # These summaries are deliberately simple: they provide a quick diagnostic
     # of the direction of within-block attrition imbalance.
-    mean_within_block_attrition_diff = mean(valid_diff),
-    median_within_block_attrition_diff = stats::median(valid_diff),
+    mean_within_block_attrition_diff = if (length(valid_diff) > 0) mean(valid_diff) else NA_real_,
+    median_within_block_attrition_diff = if (length(valid_diff) > 0) stats::median(valid_diff) else NA_real_,
+    min_within_block_attrition_diff = if (length(valid_diff) > 0) min(valid_diff) else NA_real_,
+    q1_within_block_attrition_diff = q[[1]],
+    q3_within_block_attrition_diff = q[[3]],
+    max_within_block_attrition_diff = if (length(valid_diff) > 0) max(valid_diff) else NA_real_,
     block_table = block_table
   )
 }
@@ -360,14 +580,37 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
 # The old package exposes class/method internals.  This helper turns those into
 # a readable label for printing.
 .ri_test_label <- function(class, method.list) {
-  class_label <- switch(
-    class,
-    "RS" = "Rank-sum",
-    "MWU+" = "MWU+",
-    "MWU-" = "MWU-",
-    class
-  )
-  paste(class_label, "/", method.list$name)
+  if (class == "RS" && method.list$name == "Wilcoxon") {
+    return("Wilcoxon Rank-sum")
+  }
+  if (class == "RS" && method.list$name == "Stephenson") {
+    return("Stephenson Rank-sum")
+  }
+  if (class == "MWU+" && method.list$name == "Wilcoxon") {
+    return("Wilcoxon MWU+")
+  }
+  if (class == "MWU-" && method.list$name == "Wilcoxon") {
+    return("Wilcoxon MWU-")
+  }
+  if (class == "MWU+" && method.list$name == "Polynomial") {
+    return("Polynomial MWU+")
+  }
+  if (class == "MWU-" && method.list$name == "Polynomial") {
+    return("Polynomial MWU-")
+  }
+
+  paste(class, method.list$name)
+}
+
+.ri_twostep_test_label <- function(missing, method.list) {
+  if (missing %in% c("general", "mp")) {
+    return(paste(method.list$name, "MWU+"))
+  }
+  if (missing == "mn") {
+    return(paste(method.list$name, "MWU-"))
+  }
+
+  paste(method.list$name, "Two-step")
 }
 
 #----------- Bridge to legacy sharp-null engine -------------------------------#
@@ -778,10 +1021,29 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
   paste0("[", .ri_format_num(lower, digits), ", ", .ri_format_num(upper, digits), "]")
 }
 
+.ri_cluster_outcome_label <- function(cluster_outcome) {
+  if (identical(cluster_outcome, "mean_observed")) {
+    return("Mean of observed individual outcomes")
+  }
+  cluster_outcome
+}
+
+.ri_cluster_missing_label <- function(cluster_missing) {
+  if (identical(cluster_missing, "all_missing")) {
+    return("Missing only if all individual outcomes are missing")
+  }
+  if (identical(cluster_missing, "any_missing")) {
+    return("Missing if any individual outcome is missing")
+  }
+  cluster_missing
+}
+
 .ri_summary_table <- function(x) {
-  data.frame(
+  out <- data.frame(
+    `Missingness assumption` = x$results$`Missingness assumption`,
     Method = x$results$Method,
-    `Test stat.` = vapply(x$results$`Test stat.`, .ri_format_num, character(1)),
+    `Test stat.` = x$results$`Test stat.`,
+    `Test stat. value` = vapply(x$results$`Test stat. value`, .ri_format_num, character(1)),
     `P-value` = vapply(x$results$`P-value`, .ri_format_num, character(1)),
     `CI` = vapply(
       seq_len(nrow(x$results)),
@@ -791,6 +1053,12 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
     stringsAsFactors = FALSE,
     check.names = FALSE
   )
+
+  if (!isTRUE(x$include_ci)) {
+    out$CI <- NULL
+  }
+
+  out
 }
 
 #----------- S3 print/summary methods ----------------------------------------#
@@ -806,50 +1074,106 @@ ri_test <- function(Z, Y, c = 0, missing = "general", class = "RS",
 print.riattrition_result <- function(x, ...) {
   counts <- x$counts
   summary.table <- .ri_summary_table(x)
-  ci.label <- paste0("[", round(100 * x$confidence_level), "% C.I.]")
-  names(summary.table)[4] <- ci.label
+  if (isTRUE(x$include_ci)) {
+    ci.label <- paste0("[", round(100 * x$confidence_level), "% C.I.]")
+    names(summary.table)[6] <- ci.label
+  }
 
   cat("Call: ", deparse(x$call), "\n\n", sep = "")
-  cat("Missingness summary\n", sep = "")
-  cat(sprintf("%-22s %s\n", "Number of Obs.", counts$n_total))
-  cat(sprintf("%-22s %s\n", "Observed outcome", counts$n_obs))
-  cat(sprintf("%-22s %s\n", "Missing outcome", counts$n_miss))
-  cat(sprintf("%-22s %s\n", "Observed treated", counts$n_obs_treat))
-  cat(sprintf("%-22s %s\n", "Observed control", counts$n_obs_control))
-  cat(sprintf("%-22s %s\n", "Missing treated", counts$n_miss_treat))
-  cat(sprintf("%-22s %s\n", "Missing control", counts$n_miss_control))
-  cat(sprintf("%-22s %s\n", "Overall attrition rate", .ri_format_num(counts$attrition_rate_total)))
-  cat(sprintf("%-22s %s\n", "Treated attrition rate", .ri_format_num(counts$attrition_rate_treat)))
-  cat(sprintf("%-22s %s\n", "Control attrition rate", .ri_format_num(counts$attrition_rate_control)))
-  cat(sprintf("%-22s %s\n", "Assumption", x$assumption))
+  cat("Overall missingness\n", sep = "")
+  cat(sprintf("%-18s %-10s %-10s %-10s\n", "", "Total", "T", "C"))
+  obs_label <- if (identical(x$inference_unit, "cluster")) "Number of clusters" else "Number of Obs."
+  miss_label <- if (identical(x$inference_unit, "cluster")) "Missing clusters" else "Missing units"
+  cat(sprintf("%-18s %-10s %-10s %-10s\n",
+              obs_label,
+              counts$n_total,
+              counts$n_treat,
+              counts$n_control))
+  cat(sprintf("%-18s %-10s %-10s %-10s\n",
+              miss_label,
+              counts$n_miss,
+              counts$n_miss_treat,
+              counts$n_miss_control))
+  cat(sprintf("%-18s %-10s %-10s %-10s\n\n",
+              "Attrition rate",
+              .ri_format_num(counts$attrition_rate_total),
+              .ri_format_num(counts$attrition_rate_treat),
+              .ri_format_num(counts$attrition_rate_control)))
+
+  if (!is.null(x$cluster_diagnostics)) {
+    cat("Cluster summary\n", sep = "")
+    cat(sprintf("%-38s %s\n", "Number of individuals", x$cluster_diagnostics$n_individuals))
+    cat(sprintf("%-38s %s\n", "Number of clusters", x$cluster_diagnostics$n_clusters))
+    cat(sprintf("%-38s %s\n", "Cluster outcome", .ri_cluster_outcome_label(x$cluster_outcome)))
+    cat(sprintf("%-38s %s\n", "Cluster missingness", .ri_cluster_missing_label(x$cluster_missing)))
+    cat(sprintf("%-38s %s\n", "Mean cluster size", .ri_format_num(x$cluster_diagnostics$mean_cluster_size)))
+    cat(sprintf("%-38s %s\n", "Mean cluster response rate", .ri_format_num(x$cluster_diagnostics$mean_cluster_response_rate)))
+    cat(sprintf("%-38s %s\n", "Clusters with no observed outcome", x$cluster_diagnostics$clusters_with_no_observed_outcome))
+    cat(sprintf("%-38s %s\n\n", "Clusters with any missing", x$cluster_diagnostics$clusters_with_any_missing))
+  }
+
+  if (!is.null(x$block_diagnostics)) {
+    cat("Block missingness\n", sep = "")
+    cat(sprintf("%-18s %s\n", "Number of blocks", x$block_diagnostics$n_blocks))
+    if (isTRUE(x$block_missing_sum)) {
+      cat("\nWithin-block attrition diff (T - C)\n", sep = "")
+      cat(sprintf("%-10s %-10s %-10s %-10s %-10s %-10s\n",
+                  "Mean", "Median", "Min", "Q1", "Q3", "Max"))
+      cat(sprintf("%-10s %-10s %-10s %-10s %-10s %-10s\n",
+                  .ri_format_num(x$block_diagnostics$mean_within_block_attrition_diff),
+                  .ri_format_num(x$block_diagnostics$median_within_block_attrition_diff),
+                  .ri_format_num(x$block_diagnostics$min_within_block_attrition_diff),
+                  .ri_format_num(x$block_diagnostics$q1_within_block_attrition_diff),
+                  .ri_format_num(x$block_diagnostics$q3_within_block_attrition_diff),
+                  .ri_format_num(x$block_diagnostics$max_within_block_attrition_diff)))
+    } else {
+      cat(sprintf("%-34s %s\n",
+                  "Mean within-block attrition diff",
+                  .ri_format_num(x$block_diagnostics$mean_within_block_attrition_diff)))
+    }
+    cat("\n", sep = "")
+  }
+
+  cat("Inference setup\n", sep = "")
+  cat(sprintf("%-22s %s\n", "Inference unit", x$inference_unit))
   cat(sprintf("%-22s %s\n", "Design", x$design))
   cat(sprintf("%-22s %s\n", "Test statistic", x$test_name))
   cat(sprintf("%-22s %s\n\n", "Null hypothesis", paste0("tau = ", x$null_hypothesis)))
 
-  if (!is.null(x$block_diagnostics)) {
-    cat("Block diagnostics\n", sep = "")
-    cat(sprintf("%-34s %s\n", "Number of blocks", x$block_diagnostics$n_blocks))
-    cat(sprintf("%-34s %s\n",
-                "Mean within-block attrition diff",
-                .ri_format_num(x$block_diagnostics$mean_within_block_attrition_diff)))
-    cat(sprintf("%-34s %s\n\n",
-                "Median within-block attrition diff",
-                .ri_format_num(x$block_diagnostics$median_within_block_attrition_diff)))
+  if (isTRUE(x$include_ci)) {
+    cat(strrep("=", 120), "\n", sep = "")
+    cat(sprintf("%-22s %-12s %-22s %-16s %-12s %-28s\n",
+                names(summary.table)[1], names(summary.table)[2],
+                names(summary.table)[3], names(summary.table)[4],
+                names(summary.table)[5], names(summary.table)[6]))
+    cat(strrep("=", 120), "\n", sep = "")
+    for (i in seq_len(nrow(summary.table))) {
+      cat(sprintf("%-22s %-12s %-22s %-16s %-12s %-28s\n",
+                  summary.table$`Missingness assumption`[i],
+                  summary.table$Method[i],
+                  summary.table$`Test stat.`[i],
+                  summary.table$`Test stat. value`[i],
+                  summary.table$`P-value`[i],
+                  summary.table[[6]][i]))
+    }
+    cat(strrep("=", 120), "\n", sep = "")
+  } else {
+    cat(strrep("=", 90), "\n", sep = "")
+    cat(sprintf("%-22s %-12s %-22s %-16s %-12s\n",
+                names(summary.table)[1], names(summary.table)[2],
+                names(summary.table)[3], names(summary.table)[4],
+                names(summary.table)[5]))
+    cat(strrep("=", 90), "\n", sep = "")
+    for (i in seq_len(nrow(summary.table))) {
+      cat(sprintf("%-22s %-12s %-22s %-16s %-12s\n",
+                  summary.table$`Missingness assumption`[i],
+                  summary.table$Method[i],
+                  summary.table$`Test stat.`[i],
+                  summary.table$`Test stat. value`[i],
+                  summary.table$`P-value`[i]))
+    }
+    cat(strrep("=", 90), "\n", sep = "")
   }
-
-  cat(strrep("=", 72), "\n", sep = "")
-  cat(sprintf("%-14s %-12s %-12s %-28s\n",
-              names(summary.table)[1], names(summary.table)[2],
-              names(summary.table)[3], names(summary.table)[4]))
-  cat(strrep("=", 72), "\n", sep = "")
-  for (i in seq_len(nrow(summary.table))) {
-    cat(sprintf("%-14s %-12s %-12s %-28s\n",
-                summary.table$Method[i],
-                summary.table$`Test stat.`[i],
-                summary.table$`P-value`[i],
-                summary.table[[4]][i]))
-  }
-  cat(strrep("=", 72), "\n", sep = "")
 
   if (length(x$notes) > 0) {
     cat("\nNotes\n", sep = "")
