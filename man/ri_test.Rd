@@ -12,7 +12,7 @@ ri_sharp_attrition(
   class = "RS",
   method.list = list(name = "Wilcoxon"),
   block = NULL,
-  block_missing_sum = FALSE,
+  block_missing_sum = TRUE,
   cluster = NULL,
   cluster_outcome = "mean_observed",
   cluster_missing = "all_missing",

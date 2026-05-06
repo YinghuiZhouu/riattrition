@@ -26,8 +26,8 @@ test_that("ri_sharp_attrition() returns a printable applied-user result", {
     c("Missingness assumption", "Method", "Test stat.", "Test stat. value", "P-value", "CI lower", "CI upper")
   )
   expect_equal(out$results$`Missingness assumption`[[1]], "general")
-  expect_equal(out$results$Method[[1]], "Sharp-null")
-  expect_equal(out$results$`Test stat.`[[1]], "Wilcoxon Rank-sum")
+  expect_equal(out$results$Method[[1]], "Sharp")
+  expect_equal(out$results$`Test stat.`[[1]], "Wilcoxon rank-sum")
   expect_true(is.numeric(out$results$`Test stat. value`[[1]]))
   expect_true(is.numeric(out$results$`P-value`[[1]]))
   expect_invisible(print(out))
@@ -92,10 +92,11 @@ test_that("block_missing_sum controls expanded block printing", {
   Y <- c(2, NA, 3, 1, NA, 0)
   block <- c("A", "A", "B", "B", "C", "C")
 
-  out_default <- ri_sharp_attrition(
+  out_hidden <- ri_sharp_attrition(
     Z = Z,
     Y = Y,
     block = block,
+    block_missing_sum = FALSE,
     nperm = 100,
     include_ci = FALSE,
     include_twostep = FALSE
@@ -111,12 +112,12 @@ test_that("block_missing_sum controls expanded block printing", {
     include_twostep = FALSE
   )
 
-  printed_default <- paste(capture.output(print(out_default)), collapse = "\n")
+  printed_hidden <- paste(capture.output(print(out_hidden)), collapse = "\n")
   printed_expanded <- paste(capture.output(print(out_expanded)), collapse = "\n")
 
-  expect_false(grepl("Median within-block attrition diff", printed_default, fixed = TRUE))
+  expect_false(grepl("Block missingness", printed_hidden, fixed = TRUE))
   expect_true(grepl("Within-block attrition diff (T - C)", printed_expanded, fixed = TRUE))
-  expect_true(grepl("Mean       Median     Min        Q1         Q3         Max", printed_expanded, fixed = TRUE))
+  expect_true(grepl("Mean       Min        Q1         Median     Q3         Max", printed_expanded, fixed = TRUE))
   expect_false(grepl("Median within-block attrition diff", printed_expanded, fixed = TRUE))
 })
 

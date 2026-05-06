@@ -74,7 +74,7 @@
 ri_sharp_attrition <- function(Z, Y, c = 0, missing = "general", class = "RS",
                                method.list = list(name = "Wilcoxon"),
                                block = NULL,
-                               block_missing_sum = FALSE,
+                               block_missing_sum = TRUE,
                                cluster = NULL,
                                cluster_outcome = "mean_observed",
                                cluster_missing = "all_missing",
@@ -155,7 +155,7 @@ ri_sharp_attrition <- function(Z, Y, c = 0, missing = "general", class = "RS",
 
     results_list[[length(results_list) + 1]] <- data.frame(
       `Missingness assumption` = assumption_i,
-      Method = "Sharp-null",
+      Method = "Sharp",
       `Test stat.` = test_name,
       `Test stat. value` = sharp_details$stat_obs,
       `P-value` = sharp_details$p_value,
@@ -581,10 +581,10 @@ ri_test <- ri_sharp_attrition
 # a readable label for printing.
 .ri_test_label <- function(class, method.list) {
   if (class == "RS" && method.list$name == "Wilcoxon") {
-    return("Wilcoxon Rank-sum")
+    return("Wilcoxon rank-sum")
   }
   if (class == "RS" && method.list$name == "Stephenson") {
-    return("Stephenson Rank-sum")
+    return("Stephenson rank-sum")
   }
   if (class == "MWU+" && method.list$name == "Wilcoxon") {
     return("Wilcoxon MWU+")
@@ -1040,10 +1040,10 @@ ri_test <- ri_sharp_attrition
 
 .ri_summary_table <- function(x) {
   out <- data.frame(
-    `Missingness assumption` = x$results$`Missingness assumption`,
-    Method = x$results$Method,
+    Assumption = x$results$`Missingness assumption`,
+    Null = x$results$Method,
     `Test stat.` = x$results$`Test stat.`,
-    `Test stat. value` = vapply(x$results$`Test stat. value`, .ri_format_num, character(1)),
+    Value = vapply(x$results$`Test stat. value`, .ri_format_num, character(1)),
     `P-value` = vapply(x$results$`P-value`, .ri_format_num, character(1)),
     `CI` = vapply(
       seq_len(nrow(x$results)),
@@ -1074,71 +1074,89 @@ ri_test <- ri_sharp_attrition
 print.riattrition_result <- function(x, ...) {
   counts <- x$counts
   summary.table <- .ri_summary_table(x)
+  label_width <- 24
+  small_col_width <- 10
+  wide_label_width <- 38
   if (isTRUE(x$include_ci)) {
     ci.label <- paste0("[", round(100 * x$confidence_level), "% C.I.]")
     names(summary.table)[6] <- ci.label
   }
 
   cat("Call: ", deparse(x$call), "\n\n", sep = "")
+  cat("Inference setup\n", sep = "")
+  cat(sprintf("%-*s %s\n", label_width, "Inference unit", x$inference_unit))
+  cat(sprintf("%-*s %s\n", label_width, "Design", x$design))
+  cat(sprintf("%-*s %s\n", label_width, "Test statistic", x$test_name))
+  cat(sprintf("%-*s %s\n\n", label_width, "Null hypothesis", paste0("tau = ", x$null_hypothesis)))
+
   cat("Overall missingness\n", sep = "")
-  cat(sprintf("%-18s %-10s %-10s %-10s\n", "", "Total", "T", "C"))
+  cat(sprintf("%-*s %-*s %-*s %-*s\n", label_width, "", small_col_width, "Total", small_col_width, "T", small_col_width, "C"))
   obs_label <- if (identical(x$inference_unit, "cluster")) "Number of clusters" else "Number of Obs."
   miss_label <- if (identical(x$inference_unit, "cluster")) "Missing clusters" else "Missing units"
-  cat(sprintf("%-18s %-10s %-10s %-10s\n",
+  cat(sprintf("%-*s %-*s %-*s %-*s\n",
+              label_width,
               obs_label,
+              small_col_width,
               counts$n_total,
+              small_col_width,
               counts$n_treat,
+              small_col_width,
               counts$n_control))
-  cat(sprintf("%-18s %-10s %-10s %-10s\n",
+  cat(sprintf("%-*s %-*s %-*s %-*s\n",
+              label_width,
               miss_label,
+              small_col_width,
               counts$n_miss,
+              small_col_width,
               counts$n_miss_treat,
+              small_col_width,
               counts$n_miss_control))
-  cat(sprintf("%-18s %-10s %-10s %-10s\n\n",
+  cat(sprintf("%-*s %-*s %-*s %-*s\n\n",
+              label_width,
               "Attrition rate",
+              small_col_width,
               .ri_format_num(counts$attrition_rate_total),
+              small_col_width,
               .ri_format_num(counts$attrition_rate_treat),
+              small_col_width,
               .ri_format_num(counts$attrition_rate_control)))
 
   if (!is.null(x$cluster_diagnostics)) {
     cat("Cluster summary\n", sep = "")
-    cat(sprintf("%-38s %s\n", "Number of individuals", x$cluster_diagnostics$n_individuals))
-    cat(sprintf("%-38s %s\n", "Number of clusters", x$cluster_diagnostics$n_clusters))
-    cat(sprintf("%-38s %s\n", "Cluster outcome", .ri_cluster_outcome_label(x$cluster_outcome)))
-    cat(sprintf("%-38s %s\n", "Cluster missingness", .ri_cluster_missing_label(x$cluster_missing)))
-    cat(sprintf("%-38s %s\n", "Mean cluster size", .ri_format_num(x$cluster_diagnostics$mean_cluster_size)))
-    cat(sprintf("%-38s %s\n", "Mean cluster response rate", .ri_format_num(x$cluster_diagnostics$mean_cluster_response_rate)))
-    cat(sprintf("%-38s %s\n", "Clusters with no observed outcome", x$cluster_diagnostics$clusters_with_no_observed_outcome))
-    cat(sprintf("%-38s %s\n\n", "Clusters with any missing", x$cluster_diagnostics$clusters_with_any_missing))
+    cat(sprintf("%-*s %s\n", wide_label_width, "Number of individuals", x$cluster_diagnostics$n_individuals))
+    cat(sprintf("%-*s %s\n", wide_label_width, "Number of clusters", x$cluster_diagnostics$n_clusters))
+    cat(sprintf("%-*s %s\n", wide_label_width, "Cluster outcome", .ri_cluster_outcome_label(x$cluster_outcome)))
+    cat(sprintf("%-*s %s\n", wide_label_width, "Cluster missingness", .ri_cluster_missing_label(x$cluster_missing)))
+    cat(sprintf("%-*s %s\n", wide_label_width, "Mean cluster size", .ri_format_num(x$cluster_diagnostics$mean_cluster_size)))
+    cat(sprintf("%-*s %s\n", wide_label_width, "Mean cluster response rate", .ri_format_num(x$cluster_diagnostics$mean_cluster_response_rate)))
+    cat(sprintf("%-*s %s\n", wide_label_width, "Clusters with no observed outcome", x$cluster_diagnostics$clusters_with_no_observed_outcome))
+    cat(sprintf("%-*s %s\n\n", wide_label_width, "Clusters with any missing", x$cluster_diagnostics$clusters_with_any_missing))
   }
 
-  if (!is.null(x$block_diagnostics)) {
+  if (isTRUE(x$block_missing_sum) && !is.null(x$block_diagnostics)) {
     cat("Block missingness\n", sep = "")
-    cat(sprintf("%-18s %s\n", "Number of blocks", x$block_diagnostics$n_blocks))
+    cat(sprintf("%-*s %s\n", label_width, "Number of blocks", x$block_diagnostics$n_blocks))
     if (isTRUE(x$block_missing_sum)) {
-      cat("\nWithin-block attrition diff (T - C)\n", sep = "")
-      cat(sprintf("%-10s %-10s %-10s %-10s %-10s %-10s\n",
-                  "Mean", "Median", "Min", "Q1", "Q3", "Max"))
-      cat(sprintf("%-10s %-10s %-10s %-10s %-10s %-10s\n",
-                  .ri_format_num(x$block_diagnostics$mean_within_block_attrition_diff),
-                  .ri_format_num(x$block_diagnostics$median_within_block_attrition_diff),
-                  .ri_format_num(x$block_diagnostics$min_within_block_attrition_diff),
-                  .ri_format_num(x$block_diagnostics$q1_within_block_attrition_diff),
-                  .ri_format_num(x$block_diagnostics$q3_within_block_attrition_diff),
-                  .ri_format_num(x$block_diagnostics$max_within_block_attrition_diff)))
-    } else {
-      cat(sprintf("%-34s %s\n",
-                  "Mean within-block attrition diff",
-                  .ri_format_num(x$block_diagnostics$mean_within_block_attrition_diff)))
+      cat(sprintf("%-*s\n", label_width, "Within-block attrition diff (T - C)"))
+      cat(sprintf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s\n",
+                  label_width, "",
+                  small_col_width, "Mean",
+                  small_col_width, "Min",
+                  small_col_width, "Q1",
+                  small_col_width, "Median",
+                  small_col_width, "Q3",
+                  small_col_width, "Max"))
+      cat(sprintf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s\n",
+                  label_width, "",
+                  small_col_width, .ri_format_num(x$block_diagnostics$mean_within_block_attrition_diff),
+                  small_col_width, .ri_format_num(x$block_diagnostics$min_within_block_attrition_diff),
+                  small_col_width, .ri_format_num(x$block_diagnostics$q1_within_block_attrition_diff),
+                  small_col_width, .ri_format_num(x$block_diagnostics$median_within_block_attrition_diff),
+                  small_col_width, .ri_format_num(x$block_diagnostics$q3_within_block_attrition_diff),
+                  small_col_width, .ri_format_num(x$block_diagnostics$max_within_block_attrition_diff)))
     }
     cat("\n", sep = "")
   }
-
-  cat("Inference setup\n", sep = "")
-  cat(sprintf("%-22s %s\n", "Inference unit", x$inference_unit))
-  cat(sprintf("%-22s %s\n", "Design", x$design))
-  cat(sprintf("%-22s %s\n", "Test statistic", x$test_name))
-  cat(sprintf("%-22s %s\n\n", "Null hypothesis", paste0("tau = ", x$null_hypothesis)))
 
   if (isTRUE(x$include_ci)) {
     cat(strrep("=", 120), "\n", sep = "")
@@ -1149,10 +1167,10 @@ print.riattrition_result <- function(x, ...) {
     cat(strrep("=", 120), "\n", sep = "")
     for (i in seq_len(nrow(summary.table))) {
       cat(sprintf("%-22s %-12s %-22s %-16s %-12s %-28s\n",
-                  summary.table$`Missingness assumption`[i],
-                  summary.table$Method[i],
+                  summary.table$Assumption[i],
+                  summary.table$Null[i],
                   summary.table$`Test stat.`[i],
-                  summary.table$`Test stat. value`[i],
+                  summary.table$Value[i],
                   summary.table$`P-value`[i],
                   summary.table[[6]][i]))
     }
@@ -1166,10 +1184,10 @@ print.riattrition_result <- function(x, ...) {
     cat(strrep("=", 90), "\n", sep = "")
     for (i in seq_len(nrow(summary.table))) {
       cat(sprintf("%-22s %-12s %-22s %-16s %-12s\n",
-                  summary.table$`Missingness assumption`[i],
-                  summary.table$Method[i],
+                  summary.table$Assumption[i],
+                  summary.table$Null[i],
                   summary.table$`Test stat.`[i],
-                  summary.table$`Test stat. value`[i],
+                  summary.table$Value[i],
                   summary.table$`P-value`[i]))
     }
     cat(strrep("=", 90), "\n", sep = "")
