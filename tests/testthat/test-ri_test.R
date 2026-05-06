@@ -1,11 +1,13 @@
 source(testthat::test_path("../../R/0_function_sharp_null.R"))
 source(testthat::test_path("../../R/0_function_sharp_null_twostep.R"))
 source(testthat::test_path("../../R/1_result_output.R"))
+source(testthat::test_path("../../R/2_visualization.R"))
 
 test_that("ri_sharp_attrition() returns a printable applied-user result", {
   Z <- c(1, 1, 1, 0, 0, 0)
   Y <- c(NA, 8, 6, 3, 4, NA)
 
+  set.seed(123)
   out <- ri_sharp_attrition(
     Z = Z,
     Y = Y,
@@ -232,5 +234,135 @@ test_that("cluster-level analysis requires constant treatment within cluster", {
       include_twostep = FALSE
     ),
     "Treatment assignment must be constant within each cluster"
+  )
+})
+
+test_that("plot_ri_test_stat() returns visualization data aligned with ri_sharp_attrition()", {
+  Z <- c(1, 1, 1, 0, 0, 0)
+  Y <- c(NA, 8, 6, 3, 4, NA)
+
+  set.seed(123)
+  out <- ri_sharp_attrition(
+    Z = Z,
+    Y = Y,
+    c = 0,
+    missing = "general",
+    class = "RS",
+    method.list = list(name = "Wilcoxon"),
+    nperm = 200,
+    include_ci = FALSE,
+    include_twostep = FALSE
+  )
+
+  tf <- tempfile(fileext = ".pdf")
+  grDevices::pdf(tf)
+  on.exit({
+    grDevices::dev.off()
+    unlink(tf)
+  }, add = TRUE)
+
+  set.seed(123)
+  viz <- plot_ri_test_stat(
+    Z = Z,
+    Y = Y,
+    c = 0,
+    missing = "general",
+    class = "RS",
+    method.list = list(name = "Wilcoxon"),
+    nperm = 200
+  )
+
+  expect_s3_class(viz, "riattrition_plot")
+  expect_equal(viz$assumption, "general")
+  expect_equal(viz$test_name, "Wilcoxon rank-sum")
+  expect_equal(viz$stat_obs, out$results$`Test stat. value`[[1]])
+  expect_equal(viz$p_value, out$results$`P-value`[[1]])
+  expect_length(viz$stat_null, 200)
+})
+
+test_that("plot_ri_test_stat() supports density style", {
+  Z <- c(1, 0, 1, 0, 1, 0)
+  Y <- c(2, NA, 3, 1, NA, 0)
+  block <- c("A", "A", "B", "B", "C", "C")
+
+  tf <- tempfile(fileext = ".pdf")
+  grDevices::pdf(tf)
+  on.exit({
+    grDevices::dev.off()
+    unlink(tf)
+  }, add = TRUE)
+
+  expect_no_error(
+    plot_ri_test_stat(
+      Z = Z,
+      Y = Y,
+      block = block,
+      nperm = 100,
+      style = "density"
+    )
+  )
+})
+
+test_that("plot_ri_test_stat() supports complete-case visualization", {
+  Z <- c(1, 1, 1, 0, 0, 0)
+  Y <- c(NA, 8, 6, 3, 4, NA)
+
+  tf <- tempfile(fileext = ".pdf")
+  grDevices::pdf(tf)
+  on.exit({
+    grDevices::dev.off()
+    unlink(tf)
+  }, add = TRUE)
+
+  expect_no_error(
+    viz <- plot_ri_test_stat(
+      Z = Z,
+      Y = Y,
+      analysis = "complete-case",
+      nperm = 100
+    )
+  )
+
+  expect_equal(viz$analysis, "complete-case")
+  expect_equal(viz$assumption, "complete-case")
+  expect_equal(viz$mode_label, "complete-case analysis")
+  expect_length(viz$stat_null, 100)
+})
+
+test_that("plot_ri_test_stat() supports blocked complete-case visualization", {
+  Z <- c(1, 0, 1, 0, 1, 0)
+  Y <- c(2, NA, 3, 1, NA, 0)
+  block <- c("A", "A", "B", "B", "C", "C")
+
+  tf <- tempfile(fileext = ".pdf")
+  grDevices::pdf(tf)
+  on.exit({
+    grDevices::dev.off()
+    unlink(tf)
+  }, add = TRUE)
+
+  expect_no_error(
+    plot_ri_test_stat(
+      Z = Z,
+      Y = Y,
+      block = block,
+      analysis = "complete-case",
+      nperm = 100
+    )
+  )
+})
+
+test_that("plot_ri_test_stat() restricts non-general assumptions in general mode", {
+  Z <- c(1, 1, 1, 0, 0, 0)
+  Y <- c(NA, 8, 6, 3, 4, NA)
+
+  expect_error(
+    plot_ri_test_stat(
+      Z = Z,
+      Y = Y,
+      missing = "mn",
+      nperm = 100
+    ),
+    "When analysis = \"general\""
   )
 })

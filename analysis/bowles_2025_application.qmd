@@ -129,6 +129,7 @@ For this application, we directly source the updated package code from the synch
 source(file.path(package_dir, "R", "0_function_sharp_null.R"))
 source(file.path(package_dir, "R", "0_function_sharp_null_twostep.R"))
 source(file.path(package_dir, "R", "1_result_output.R"))
+source(file.path(package_dir, "R", "2_visualization.R"))
 ```
 
 ## Load Replication Data
@@ -284,6 +285,126 @@ discernment_direct
 ```{r}
 treat_knowledge_direct
 ```
+
+## Visualizing general versus complete-case inference
+
+The new `plot_ri_test_stat()` helper uses the same sharp-null machinery as
+`ri_sharp_attrition()`, but turns the output into a visual summary. In the
+default histogram view:
+
+- the bars show the empirical randomization null distribution;
+- the dashed reference marks the observed test statistic; and
+- the highlighted right tail corresponds to the p-value
+  \eqn{\Pr(T_{null} \geq T_{obs})}.
+
+For discernment, it is especially useful to compare:
+
+- `analysis = "general"`, which treats attrition as a core missing-data problem;
+- `analysis = "complete-case"`, which restricts attention to endline respondents only.
+
+```{r, include=FALSE}
+set.seed(11215)
+discernment_general_plot <- plot_ri_test_stat(
+  Z = app_data$Z,
+  Y = app_data$end_icw_discernment,
+  c = 0,
+  missing = "general",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  block = app_data$block_id,
+  nperm = nperm
+)
+
+set.seed(11215)
+discernment_complete_case_plot <- plot_ri_test_stat(
+  Z = app_data$Z,
+  Y = app_data$end_icw_discernment,
+  c = 0,
+  analysis = "complete-case",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  block = app_data$block_id,
+  nperm = nperm
+)
+```
+
+### General missingness
+
+```{r, fig.width=9, fig.height=5}
+set.seed(11215)
+plot_ri_test_stat(
+  Z = app_data$Z,
+  Y = app_data$end_icw_discernment,
+  c = 0,
+  missing = "general",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  block = app_data$block_id,
+  nperm = nperm
+)
+```
+
+### Complete-case analysis
+
+```{r, fig.width=9, fig.height=5}
+set.seed(11215)
+plot_ri_test_stat(
+  Z = app_data$Z,
+  Y = app_data$end_icw_discernment,
+  c = 0,
+  analysis = "complete-case",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  block = app_data$block_id,
+  nperm = nperm
+)
+```
+
+The returned objects also store the plotted values, so we can compare the two
+analyses directly:
+
+```{r}
+bind_rows(
+  tibble(
+    analysis = discernment_general_plot$mode_label,
+    label = discernment_general_plot$assumption,
+    test_statistic = discernment_general_plot$test_name,
+    observed_statistic = discernment_general_plot$stat_obs,
+    p_value = discernment_general_plot$p_value,
+    design = discernment_general_plot$design,
+    nperm = discernment_general_plot$nperm
+  ),
+  tibble(
+    analysis = discernment_complete_case_plot$mode_label,
+    label = discernment_complete_case_plot$assumption,
+    test_statistic = discernment_complete_case_plot$test_name,
+    observed_statistic = discernment_complete_case_plot$stat_obs,
+    p_value = discernment_complete_case_plot$p_value,
+    design = discernment_complete_case_plot$design,
+    nperm = discernment_complete_case_plot$nperm
+  )
+) %>%
+  kable(digits = 3)
+```
+
+- Under `analysis = "complete-case"`, the test drops missing outcomes and works
+  only with the `4543` endline respondents. In this observed-only sample, the
+  discernment outcome is higher in treatment than in control, and the observed
+  Wilcoxon rank-sum statistic is about `1682.755`. The corresponding blocked
+  complete-case null distribution is much farther left, roughly from `1657.510`
+  to `1668.716`, so none of the `1000` null draws is at least as large as the
+  observed statistic. That is why the empirical p-value is `0.000`.
+- Under `analysis = "general"`, the test keeps all `8947` randomized units and
+  applies the package's most conservative completion rule under general
+  missingness. Here there are `4404` missing outcomes in total, including
+  `3260` missing treated outcomes and `1144` missing control outcomes. Under
+  the sharp null with `c = 0`, the missing treated outcomes are placed at
+  `-Inf`, while the missing control outcomes are placed at `Inf`. This pushes
+  the observed rank-sum statistic sharply downward to about `2665.175`, whereas
+  the blocked general-missingness null distribution is much farther right,
+  roughly from `3289.456` to `3303.063`. Every one of the `1000` null draws is
+  at least as large as the observed statistic, so the empirical p-value is
+  `1.000`.
 
 ## Sensitivity Check: `missing = "mn"`
 
