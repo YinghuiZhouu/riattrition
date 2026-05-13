@@ -19,6 +19,7 @@ plot_ri_test_stat(
   style = c("histogram", "density"),
   bins = "FD",
   show_density = TRUE,
+  off_support = c("auto", "arrow", "extend", "split"),
   main = NULL,
   xlab = NULL,
   ylab = NULL,
@@ -76,6 +77,14 @@ available as a smoother alternative.}
 
 \item{show_density}{A logical value indicating whether a density curve should
 be overlaid when \code{style = "histogram"}.}
+
+\item{off_support}{A string that specifies how to display the observed test
+statistic when it falls outside the support of the permutation null
+distribution. \code{"auto"} extends the axis for modest gaps and uses a split
+axis for large gaps. \code{"arrow"} keeps the current support and points
+toward the off-support value. \code{"extend"} enlarges the x-axis to include
+the observed statistic. \code{"split"} uses a split-axis display so that the
+observed statistic remains visible without compressing the null distribution.}
 
 \item{main}{Optional main title. If \code{NULL}, the function supplies a
 default.}

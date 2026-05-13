@@ -278,6 +278,8 @@ test_that("plot_ri_test_stat() returns visualization data aligned with ri_sharp_
   expect_equal(viz$stat_obs, out$results$`Test stat. value`[[1]])
   expect_equal(viz$p_value, out$results$`P-value`[[1]])
   expect_length(viz$stat_null, 200)
+  expect_equal(viz$off_support_mode, "inside")
+  expect_equal(viz$obs_position, "inside")
 })
 
 test_that("plot_ri_test_stat() supports density style", {
@@ -327,6 +329,89 @@ test_that("plot_ri_test_stat() supports complete-case visualization", {
   expect_equal(viz$assumption, "complete-case")
   expect_equal(viz$mode_label, "complete-case analysis")
   expect_length(viz$stat_null, 100)
+})
+
+find_off_support_example <- function(target_mode = c("extend", "split"),
+                                     nperm = 50,
+                                     seed = 1,
+                                     max_iter = 1000) {
+  target_mode <- match.arg(target_mode)
+  set.seed(seed)
+
+  for (iter in seq_len(max_iter)) {
+    Z <- c(rep(1, 6), rep(0, 6))
+    Y <- sample(c(NA, -2:8), 12, replace = TRUE)
+
+    tf <- tempfile(fileext = ".pdf")
+    grDevices::pdf(tf)
+    viz <- try(
+      plot_ri_test_stat(
+        Z = Z,
+        Y = Y,
+        nperm = nperm,
+        off_support = "auto"
+      ),
+      silent = TRUE
+    )
+    grDevices::dev.off()
+    unlink(tf)
+
+    if (!inherits(viz, "try-error") && identical(viz$off_support_mode, target_mode)) {
+      return(list(Z = Z, Y = Y, viz = viz))
+    }
+  }
+
+  stop("Could not find a deterministic off-support example for testing.")
+}
+
+test_that("plot_ri_test_stat() can extend the x-axis for modest off-support gaps", {
+  example <- find_off_support_example(target_mode = "extend")
+  Z <- example$Z
+  Y <- example$Y
+
+  tf <- tempfile(fileext = ".pdf")
+  grDevices::pdf(tf)
+  on.exit({
+    grDevices::dev.off()
+    unlink(tf)
+  }, add = TRUE)
+
+  expect_no_error(
+    viz <- plot_ri_test_stat(
+      Z = Z,
+      Y = Y,
+      nperm = 100,
+      off_support = "auto"
+    )
+  )
+
+  expect_equal(viz$obs_position, "left")
+  expect_equal(viz$off_support_mode, "extend")
+})
+
+test_that("plot_ri_test_stat() supports split-axis displays for off-support statistics", {
+  example <- find_off_support_example(target_mode = "extend")
+  Z <- example$Z
+  Y <- example$Y
+
+  tf <- tempfile(fileext = ".pdf")
+  grDevices::pdf(tf)
+  on.exit({
+    grDevices::dev.off()
+    unlink(tf)
+  }, add = TRUE)
+
+  expect_no_error(
+    viz <- plot_ri_test_stat(
+      Z = Z,
+      Y = Y,
+      nperm = 100,
+      off_support = "split"
+    )
+  )
+
+  expect_equal(viz$obs_position, "left")
+  expect_equal(viz$off_support_mode, "split")
 })
 
 test_that("plot_ri_test_stat() supports blocked complete-case visualization", {

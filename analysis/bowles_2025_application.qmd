@@ -344,6 +344,81 @@ plot_ri_test_stat(
 )
 ```
 
+### How the off-support options differ
+
+For Bowles' discernment outcome under `analysis = "general"`, the observed
+Wilcoxon rank-sum statistic is far to the left of the null support. That makes
+this a useful case for comparing the four `off_support` strategies:
+
+- `auto`, which now chooses `split` here;
+- `arrow`, which keeps the null support unchanged and points toward the
+  off-support observed statistic;
+- `extend`, which enlarges the x-axis so the observed statistic appears on the
+  same axis; and
+- `split`, which breaks the x-axis into a small observed-statistic panel and a
+  larger null-distribution panel.
+
+The next three figures hold the data and permutation draws fixed and vary only
+the `off_support` argument.
+
+#### General missingness with `off_support = "arrow"`
+
+```{r, fig.width=9, fig.height=5}
+set.seed(11215)
+plot_ri_test_stat(
+  Z = app_data$Z,
+  Y = app_data$end_icw_discernment,
+  c = 0,
+  missing = "general",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  block = app_data$block_id,
+  nperm = nperm,
+  off_support = "arrow"
+)
+```
+
+#### General missingness with `off_support = "extend"`
+
+```{r, fig.width=9, fig.height=5}
+set.seed(11215)
+plot_ri_test_stat(
+  Z = app_data$Z,
+  Y = app_data$end_icw_discernment,
+  c = 0,
+  missing = "general",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  block = app_data$block_id,
+  nperm = nperm,
+  off_support = "extend"
+)
+```
+
+#### General missingness with `off_support = "split"`
+
+```{r, fig.width=9, fig.height=5}
+set.seed(11215)
+plot_ri_test_stat(
+  Z = app_data$Z,
+  Y = app_data$end_icw_discernment,
+  c = 0,
+  missing = "general",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  block = app_data$block_id,
+  nperm = nperm,
+  off_support = "split"
+)
+```
+
+In this application, `arrow` is the most compact but does not put the observed
+statistic on the same x-axis as the null support. `extend` is the most literal,
+but because the observed statistic is so far away, it leaves a great deal of
+empty horizontal space and compresses the null distribution. `split` keeps the
+observed value visible while preserving the shape of the histogram, which is
+why `auto` now selects it for this case.
+
 ### Complete-case analysis
 
 ```{r, fig.width=9, fig.height=5}
