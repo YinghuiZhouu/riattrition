@@ -1,8 +1,6 @@
 #----------- Visualization helper for null distributions ---------------------#
 #
-# This file adds a lightweight plotting layer for applied users.  It does not
-# change any inferential logic.  Instead, it reuses the same ingredients as the
-# printed wrapper:
+# This file adds a lightweight plotting layer for applied users.  
 #   * .ri_prepare_analysis_data() from R/1_result_output.R
 #   * .ri_default_assignments()   from R/1_result_output.R
 #   * .ri_sharp_details()         from R/1_result_output.R
