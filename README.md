@@ -34,8 +34,7 @@ $H_0: \tau = c$.
 
 ``` r
 pval_sharp(
-  Z, Y, c = 0, missing = "general", class = "RS", 
-  method.list = list(name = "Wilcoxon"), 
+  Z, Y, c = 0, missing = "general", class = "RS", method.list = list(name = "Wilcoxon"),
   stat.null = NULL, Z.perm = NULL, nperm = 10^4
 )
 ```
@@ -91,9 +90,8 @@ constant treatment effect.
 ``` r
 ci_sharp(
   Z, Y, alternative, missing = "general", class = "RS", 
-  method.list = list(name = "Wilcoxon"), 
-  stat.null = NULL, Z.perm = NULL, nperm = 10^4, 
-  alpha = 0.05, tol = 10^(-3)
+  method.list = list(name = "Wilcoxon"),
+  stat.null = NULL, Z.perm = NULL, nperm = 10^4, alpha = 0.05, tol = 10^(-3)
 )
 ```
 
@@ -102,7 +100,7 @@ hypothesis $H_0: \tau = c$ using the two-step procedure.
 
 ``` r
 pval_sharp_twostep(
-  Z, Y, c = 0, missing, method.list = list(name = "Wilcoxon"), 
+  Z, Y, c = 0, missing, method.list = list(name = "Wilcoxon"),
   stat.null = NULL, Z.perm = NULL, nperm = 10^4, beta
 )
 ```
@@ -112,121 +110,26 @@ assuming constant treatment effect using the two-step procedure.
 
 ``` r
 ci_sharp_twostep(
-  Z, Y, alternative, missing = "general", method.list = list(name = "Wilcoxon"), 
-  stat.null = NULL, Z.perm = NULL, nperm = 10^4, 
+  Z, Y, alternative, missing = "general", method.list = list(name = "Wilcoxon"),
+  stat.null = NULL, Z.perm = NULL, nperm = 10^4,
   alpha = 0.05, beta = 0.1 * 0.05, tol = 10^(-3)
 )
 ```
 
+`application_wrapper()` provides the user-friendly wrapper function for
+empirical applications.
+
+``` r
+application_wrapper(Z, Y, seed = 1)
+```
+
 ## Examples
 
-We will use a simulated data to illustrate the usage of the main
-functions.
+We will use the replication data for Chen and Yang (2019) to illustrate
+the usage of the main functions.
 
 ``` r
-set.seed(1)
-N <- 500
-Y0 <- rnorm(N, 0, 1)
-Y1 <- Y0
-```
-
-- Threshold Missingness
-
-``` r
-set.seed(1)
-M0 <- as.numeric(Y0 <= qnorm(0.95))
-M1 <- as.numeric(Y1 >= qnorm(0.05))
-Z <- sample(c(rep(1, N/2), rep(0, N/2)))
-M <- Z * M1 + (1 - Z) * M0
-Y <- Z * Y1 + (1 - Z) * Y0 # No missing value
-Y_observed <- ifelse(M == 0, NA, Y)
-p_value_g <- pval_sharp(
-  Z, Y_observed, c = 0, missing = "general", class = "RS", 
-  method.list = list(name = "Wilcoxon"),
-  stat.null = NULL, Z.perm = NULL, nperm = 10^4
-)
-p_value_g_twostep <- pval_sharp_twostep(
-  Z, Y_observed, c = 0, missing = "general",
-  method.list = list(name = "Wilcoxon"),
-  stat.null = NULL, Z.perm = NULL, nperm = 10^4, beta = 0.1 * 0.1
-)
-```
-
-- Monotone Positive Missingness
-
-``` r
-set.seed(1)
-M0 <- as.numeric(Y0 <= qnorm(0.92))
-M1 <- as.numeric(Y0 <= qnorm(0.98))
-Z <- sample(c(rep(1, N/2), rep(0, N/2)))
-M <- Z * M1 + (1 - Z) * M0
-Y <- Z * Y1 + (1 - Z) * Y0 # No missing value
-Y_observed <- ifelse(M == 0, NA, Y)
-p_value_mp <- pval_sharp(
-  Z, Y_observed, c = 0, missing = "mp", class = "RS",
-  method.list = list(name = "Wilcoxon"),
-  stat.null = NULL, Z.perm = NULL, nperm = 10^4
-)
-p_value_mp_twostep <- pval_sharp_twostep(
-  Z, Y_observed, c = 0, missing = "mp",
-  method.list = list(name = "Wilcoxon"),
-  stat.null = NULL, Z.perm = NULL, nperm = 10^4, beta = 0.1 * 0.1
-)
-```
-
-- Monotone Negative Missingness
-
-``` r
-set.seed(1)
-M1 <- as.numeric(Y0 >= qnorm(0.08))
-M0 <- as.numeric(Y0 >= qnorm(0.02))
-Z <- sample(c(rep(1, N/2), rep(0, N/2)))
-M <- Z * M1 + (1 - Z) * M0
-Y <- Z * Y1 + (1 - Z) * Y0 # No missing value
-Y_observed <- ifelse(M == 0, NA, Y)
-p_value_mn <- pval_sharp(
-  Z, Y_observed, c = 0, missing = "mn", class = "RS",
-  method.list = list(name = "Wilcoxon"),
-  stat.null = NULL, Z.perm = NULL, nperm = 10^4
-)
-p_value_mn_twostep <- pval_sharp_twostep(
-  Z, Y_observed, c = 0, missing = "mn",
-  method.list = list(name = "Wilcoxon"),
-  stat.null = NULL, Z.perm = NULL, nperm = 10^4, beta = 0.1 * 0.1
-)
-```
-
-- Sharp Missingness
-
-``` r
-set.seed(1)
-M0 <- as.numeric(Y0 <= qnorm(0.95))
-M1 <- M0
-Z <- sample(c(rep(1, N/2), rep(0, N/2)))
-M <- Z * M1 + (1 - Z) * M0
-Y <- Z * Y1 + (1 - Z) * Y0 # No missing value
-Y_observed <- ifelse(M == 0, NA, Y)
-p_value_s <- pval_sharp(
-  Z, Y_observed, c = 0, missing = "sharp", class = "RS",
-  method.list = list(name = "Wilcoxon"),
-  stat.null = NULL, Z.perm = NULL, nperm = 10^4
-)
-```
-
-- Missing at random
-
-``` r
-set.seed(1)
-p <- 0.95
-M0 <- rbinom(N, 1, p)
-M1 <- rbinom(N, 1, p)
-Z <- sample(c(rep(1, N/2), rep(0, N/2)))
-M <- Z * M1 + (1 - Z) * M0
-Y <- Z * Y1 + (1 - Z) * Y0 # No missing value
-Y_observed <- ifelse(M == 0, NA, Y)
-p_value_r <- pval_sharp(
-  Z, Y_observed, c = 0, missing = "random", class = "RS",
-  method.list = list(name = "Wilcoxon"), 
-  stat.null = NULL, Z.perm = NULL, nperm = 10^4
-)
+Z <- chen_and_yang_2019$treatment_vpnnl
+Y <- chen_and_yang_2019$az_overall_a_w3
+result <- application_wrapper(Z = Z, Y = Y, seed = 1)
 ```

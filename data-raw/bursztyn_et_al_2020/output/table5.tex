@@ -1,0 +1,21 @@
+\def\sym#1{\ifmmode^{#1}\else\(^{#1}\)\fi}
+\begin{tabular}{@{\extracolsep{0.1cm}}l*{3}{c}} \toprule \midrule
+            &\multicolumn{1}{c}{(1)}&\multicolumn{1}{c}{(2)}&\multicolumn{1}{c}{(3)}\\
+\midrule
+Update ($-$Wedge$\times\mathbf{1}_{\textit{Treatment}}$;$\beta$)&     0.00758&     0.00648&     0.00682\\
+            &   (0.00334)&   (0.00342)&   (0.00352)\\
+\addlinespace
+Constant    &     -0.0255&      -0.116&      -0.111\\
+            &    (0.0716)&    (0.0979)&     (0.182)\\
+\midrule
+\textit{Inference robustness} ($\beta$)&            &            &            \\
+\qquad \emph{p}-value: robust SE&       0.023&       0.058&       0.053\\
+\qquad \emph{p}-value: wild bootstrap&       0.010&       0.027&       0.026\\
+\qquad \emph{p}-value: permutation test&       0.036&       0.054&       0.053\\
+\midrule Baseline beliefs and confidence&  \checkmark&  \checkmark&  \checkmark\\
+Session fixed effects&            &  \checkmark&  \checkmark\\
+Controls    &            &            &  \checkmark\\
+Observations&         500&         500&         491\\
+$R^2$       &      0.0270&      0.0798&      0.0926\\
+\bottomrule
+\end{tabular}

@@ -53,18 +53,18 @@ defined as the negative sum of relative ranks for control units.
 approximates the randomization distribution of the rank-based statistic.
 \itemize{
 \item if \code{stat.null = NULL} (default), the function will calculate it internally.
-\item if \code{missing = "general"}, \code{mp}, \code{mn}, then \eqn{n} choose \eqn{n_1}.
-\item if \code{missing = "sharp"}, \code{random}, then \eqn{n_{11} + n_{01}} choose \eqn{n_{11}}.
+\item if \code{missing = "general"}, \code{"mp"}, \code{"mn"}, then \eqn{n} choose \eqn{n_1}.
+\item if \code{missing = "sharp"}, \code{"random"}, then \eqn{n_{11} + n_{01}} choose \eqn{n_{11}}.
 }}
 
 \item{Z.perm}{A matrix that specifies the permuted assignments
 for approximating the null distribution of the test statistic.
 \itemize{
 \item if \code{Z.perm = NULL} (default), the function will calculate it internally.
-\item if \code{missing = "general"}, \code{mp}, \code{mn}, then \code{Z.perm} is an \eqn{n \times nperm} matrix
-(\eqn{n} choose \eqn{n_1}).
-\item if \code{missing = "sharp"}, \code{random}, then \code{Z.perm} is an \eqn{(n_{11} + n_{01}) \times nperm} matrix
-(\eqn{n_{11} + n_{01}} choose \eqn{n_{11}}).
+\item if \code{missing = "general"}, \code{"mp"}, \code{"mn"}, then \code{Z.perm} is an
+\eqn{n \times nperm} matrix (\eqn{n} choose \eqn{n_1}).
+\item if \code{missing = "sharp"}, \code{"random"}, then \code{Z.perm} is an
+\eqn{(n_{11} + n_{01}) \times nperm} matrix (\eqn{n_{11} + n_{01}} choose \eqn{n_{11}}).
 }}
 
 \item{nperm}{A positive integer that specifies the number of permutations to
@@ -74,5 +74,6 @@ approximate the randomization distribution of the test statistic.}
 The p-value for testing the specified sharp null hypothesis of interest.
 }
 \description{
-\code{pval_sharp()} obtains the p-value for testing the sharp null hypothesis \eqn{H_0: \tau = c}.
+\code{pval_sharp()} obtains the p-value for testing the sharp null hypothesis
+\eqn{H_0: \tau = c}.
 }

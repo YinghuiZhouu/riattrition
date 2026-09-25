@@ -1,0 +1,42 @@
+\def\sym#1{\ifmmode^{#1}\else\(^{#1}\)\fi}
+\begin{tabular}{@{\extracolsep{0.1cm}}l*{6}{c}} \toprule \midrule
+& K-L-K Index & Employed & Applied & Interviewed & Driving & Beliefs about \\
+& & & & & Lessons & Neighbors \\ \midrule
+\multicolumn{7}{@{}l}{\textit{Panel A. No controls}} \\
+\midrule
+Treatment ($\beta$)&       0.249&      0.0206&       0.104&      0.0471&       0.112&       0.128\\
+            &    (0.0495)&    (0.0285)&    (0.0317)&    (0.0185)&    (0.0463)&    (0.0267)\\
+\addlinespace
+Constant    &      -0.119&      0.0737&      0.0579&      0.0105&       0.653&       0.439\\
+            &    (0.0272)&    (0.0190)&    (0.0170)&   (0.00742)&    (0.0346)&    (0.0195)\\
+\midrule
+\textit{Inference robustness} ($\beta$)&            &            &            &            &            &            \\
+\qquad \emph{p}-value: robust SE&       0.000&       0.471&       0.001&       0.011&       0.016&       0.000\\
+\qquad \emph{p}-value: wild bootstrap&       0.000&       0.548&       0.037&       0.010&       0.029&       0.002\\
+\qquad \emph{p}-value: permutation test&       0.000&       0.577&       0.000&       0.027&       0.017&       0.000\\
+\qquad \emph{p}-value: L-S-X MHT correction&          --&       0.484&       0.003&       0.050&       0.039&       0.000\\
+\midrule \textit{Lee attrition bounds}&            &            &            &            &            &            \\
+\qquad Lower bound:&       0.238&       0.014&       0.101&       0.046&       0.092&       0.119\\
+\qquad      &    (0.0576)&    (0.0288)&    (0.0314)&    (0.0181)&    (0.0564)&    (0.0350)\\
+\addlinespace \qquad Upper bound:&       0.276&       0.033&       0.120&       0.056&       0.111&       0.138\\
+\qquad      &    (0.0592)&    (0.0532)&    (0.0555)&    (0.0166)&    (0.0500)&    (0.0392)\\
+\midrule Observations&         381&         381&         381&         381&         381&         381\\
+$R^2$       &      0.0626&     0.00137&      0.0278&      0.0168&      0.0151&      0.0571\\
+\bottomrule
+\noalign{\vskip 2mm} 
+\multicolumn{7}{@{}l}{\textit{Panel B. Session fixed effects, baseline beliefs and socioeconomic controls}} \\
+\midrule
+Treatment ($\beta$)&       0.276&      0.0223&       0.115&      0.0469&       0.125&       0.144\\
+            &    (0.0528)&    (0.0282)&    (0.0332)&    (0.0182)&    (0.0475)&    (0.0268)\\
+\addlinespace
+Constant    &      -0.141&      0.0545&     -0.0262&      0.0222&       0.882&       0.310\\
+            &     (0.210)&     (0.137)&     (0.146)&    (0.0795)&     (0.225)&     (0.114)\\
+\midrule
+\textit{Inference robustness} ($\beta$)&            &            &            &            &            &            \\
+\qquad \emph{p}-value: robust SE&       0.000&       0.429&       0.001&       0.010&       0.009&       0.000\\
+\qquad \emph{p}-value: wild bootstrap&       0.000&       0.450&       0.016&       0.004&       0.028&       0.001\\
+\qquad \emph{p}-value: permutation test&       0.000&       0.439&       0.000&       0.006&       0.011&       0.000\\
+\midrule Observations&         375&         375&         375&         375&         375&         375\\
+$R^2$       &       0.164&      0.0947&       0.166&       0.117&       0.128&       0.229\\
+\bottomrule
+\end{tabular}

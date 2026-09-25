@@ -1,0 +1,20 @@
+\def\sym#1{\ifmmode^{#1}\else\(^{#1}\)\fi}
+\begin{tabular}{@{\extracolsep{0.1cm}}l*{4}{c}}\toprule
+& Outside-home & Outside-home & Outside-home & Outside-home  \\
+& sign up & sign up & show up & show up \\
+            &\multicolumn{1}{c}{(1)}&\multicolumn{1}{c}{(2)}&\multicolumn{1}{c}{(3)}&\multicolumn{1}{c}{(4)}\\
+\midrule
+Treatment ($\beta$)&       0.153&       0.157&       0.113&       0.119\\
+            &    (0.0506)&    (0.0514)&    (0.0473)&    (0.0482)\\
+\addlinespace
+Constant    &       0.181&       0.147&       0.153&       0.180\\
+            &    (0.0322)&     (0.136)&    (0.0301)&     (0.126)\\
+\midrule
+\textit{Inference robustness} ($\beta$)&            &            &            &            \\
+\qquad \emph{p}-value: robust SE&       0.003&       0.002&       0.018&       0.014\\
+\qquad \emph{p}-value: permutation test&       0.008&       0.002&       0.018&       0.012\\
+Controls    &            &  \checkmark&            &  \checkmark\\
+Observations&         291&         291&         291&         291\\
+$R^2$       &      0.0305&      0.0548&      0.0191&      0.0363\\
+\bottomrule
+\end{tabular}
