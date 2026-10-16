@@ -1,0 +1,30 @@
+		(1)	(2)	(3)	(4)
+		news_c_panamapapers	news_c_coalprod	news_c_hkceelection	news_perccor_cen_all
+					
+VARIABLES	LABELS				
+					
+soclearning_ownaccess	soclearning_ownaccess	0.332***	0.0937*	0.185***	0.210***
+		[0.0401]	[0.0558]	[0.0614]	[0.0230]
+soclearning_rm_new_w2	soclearning_rm_new_w2	0.222***			
+		[0.0402]			
+soclearning_ownXnew_w2	soclearning_ownXnew_w2	-0.114**			
+		[0.0516]			
+soclearning_rm_new_w3	soclearning_rm_new_w3		0.0234	0.0465	0.0988***
+			[0.0559]	[0.0616]	[0.0230]
+soclearning_ownXnew_w3	soclearning_ownXnew_w3		-0.000644	0.00159	-0.0490*
+			[0.0711]	[0.0782]	[0.0293]
+Constant	Constant	0.560***	0.179***	0.226***	0.422***
+		[0.0339]	[0.0469]	[0.0516]	[0.0194]
+					
+Observations		790	667	667	634
+R-squared		0.137	0.011	0.035	0.207
+Specification		Raw Diff	Raw Diff	Raw Diff	Raw Diff
+p_all		0.332	0.0937	0.185	0.210
+q_new_1_0		0.249	0.0861	0.113	0.156
+q_new_1_1		0.121	0.0838	0.117	0.0787
+pred_mu_002		0.955	0.225	0.317	0.610
+mu_002		0.918	0.188	0.328	0.611
+pred_mu_102		1.096	0.317	0.505	0.729
+mu_102		1	0.314	0.490	0.721
+Standard errors in brackets					
+*** p<0.01, ** p<0.05, * p<0.1					

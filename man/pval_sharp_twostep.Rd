@@ -26,8 +26,8 @@ pval_sharp_twostep(
 \item{missing}{A string specifying the missing mechanism.
 \itemize{
 \item \code{missing = "general"}: general missing mechanism.
-\item \code{missing = "mp"}: monotone positive missing mechanism (\eqn{M_1 >= M_0}).
-\item \code{missing = "mn"}: monotone negative missing mechanism (\eqn{M_1 <= M_0}).
+\item \code{missing = "mp"}: monotone positive missing mechanism (\eqn{M_1 \geq M_0}).
+\item \code{missing = "mn"}: monotone negative missing mechanism (\eqn{M_1 \leq M_0}).
 }}
 
 \item{method.list}{A list that specifies the choice of test statistic:

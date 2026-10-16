@@ -1,0 +1,26 @@
+		(1)	(2)	(3)	(4)	(5)
+		a	b	c	d	e
+		Standardized values of (az_overall_a_w3)	Standardized values of (az_overall_b_w3)	Standardized values of (az_overall_c_w3)	Standardized values of (az_overall_d_w3)	Standardized values of (az_overall_e_w3)
+VARIABLES	LABELS					
+						
+treatment_vpnonly	treatment_vpnonly	0.215***	0.119	0.136	0.164*	0.176*
+		[0.080]	[0.102]	[0.100]	[0.096]	[0.096]
+treatment_nlonly	treatment_nlonly	0.126*	0.066	0.065	0.054	0.105
+		[0.075]	[0.096]	[0.103]	[0.095]	[0.092]
+treatment_vpnnl	treatment_vpnnl	1.268***	0.412***	0.573***	0.853***	0.328***
+		[0.067]	[0.088]	[0.089]	[0.086]	[0.084]
+Constant	Constant	-0.811***	-0.327***	-0.418***	-0.556***	-0.294***
+		[0.058]	[0.076]	[0.079]	[0.077]	[0.072]
+						
+Observations		1,130	1,130	1,130	1,130	1,130
+R-squared		0.348	0.031	0.062	0.162	0.016
+Specification		Raw diff	Raw diff	Raw diff	Raw diff	Raw diff
+Mean DV all		-0.186	-0.108	-0.125	-0.139	-0.090
+Std.Dev.\ DV all		0.959	0.982	0.997	0.955	0.947
+Mean DV control		-0.811	-0.327	-0.418	-0.556	-0.294
+Std.Dev.\ DV control		0.681	0.896	0.923	0.906	0.850
+Mean DV user		0.867	0.503	0.584	0.647	0.419
+Std.Dev.\ DV user		0.681	0.931	0.783	0.952	1.129
+p-value		0.000	0.000	0.000	0.000	0.000
+Robust standard errors in brackets						
+*** p<0.01, ** p<0.05, * p<0.1						

@@ -1,4 +1,12 @@
 .Rproj.user
-data-raw/trimdata1.dta
-data-raw/trimdata2.dta
-data-raw/trimdata3.dta
+data-raw/lee_2009/trimdata1.dta
+data-raw/lee_2009/trimdata2.dta
+data-raw/lee_2009/trimdata3.dta
+.DS_Store
+.Rhistory
+.RData
+.Rapp.history
+.Ruserdata
+*.tar.gz
+*.Rcheck/
+inst/doc

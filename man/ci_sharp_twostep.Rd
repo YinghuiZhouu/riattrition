@@ -33,8 +33,8 @@ ci_sharp_twostep(
 \item{missing}{A string specifying the missing mechanism.
 \itemize{
 \item \code{missing = "general"}: general missing mechanism.
-\item \code{missing = "mp"}: monotone positive missing mechanism (\eqn{M_1 >= M_0}).
-\item \code{missing = "mn"}: monotone negative missing mechanism (\eqn{M_1 <= M_0}).
+\item \code{missing = "mp"}: monotone positive missing mechanism (\eqn{M_1 \geq M_0}).
+\item \code{missing = "mn"}: monotone negative missing mechanism (\eqn{M_1 \leq M_0}).
 }}
 
 \item{method.list}{A list that specifies the choice of test statistic:
@@ -65,8 +65,15 @@ approximate the randomization distribution of the test statistic.}
 For example, if \code{tol = 10^(-3)}, then the confidence limits are precise up to 3 digits.}
 }
 \value{
-The one-sided or two-sided confidence interval for the maximum individual effect.
+The one-sided or two-sided confidence interval for the constant
+individual effect.
+\itemize{
+\item if \code{alternative = "greater"}, return the lower limit (a scalar).
+\item if \code{alternative = "less"}, return the upper limit (a scalar).
+\item if \code{alternative = "two.sided"}, return the two-sided confidence interval c(lower, upper).
+}
 }
 \description{
-\code{ci_sharp_twostep()} obtains one-sided or two-sided confidence interval for the maximum individual effect.
+\code{ci_sharp_twostep()} obtains a one-sided or two-sided confidence interval for
+the constant individual effect.
 }

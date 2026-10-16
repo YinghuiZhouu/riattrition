@@ -1,0 +1,91 @@
+---
+title: "application"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{application}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(riattrition)
+```
+
+## Application: Lee (2009)
+
+```{r, eval=FALSE}
+result.list <- list()
+for (week in c(90, 135, 180)) {
+  Z <- lee_2009[["treatmnt"]]
+  Y <- lee_2009[[paste0("lhrwage", week)]]
+  result.list[[paste0("week", week)]] <- application_wrapper(Z = Z, Y = Y, seed = 1)
+}
+
+# Generate Latex table for p-value and CI
+make_latex_table(result.list)
+
+# Draw the sensitivity analysis plot
+plot_sens(sens_pval = result.list$week90$sens_pval, output_file = "application_lee_2009_week90_sens.pdf")
+```
+
+## Application: Chen and Yang (2019)
+
+```{r, eval=FALSE}
+Z <- chen_and_yang_2019$treatment_vpnnl
+Y <- chen_and_yang_2019$az_overall_a_w3
+result <- application_wrapper(Z = Z, Y = Y, seed = 1)
+result.list <- list(result1 = result)
+
+# Generate LaTex table for p-value and CI
+make_latex_table(result.list)
+
+# Draw the sensitivity analysis plot
+plot_sens(sens_pval = result$sens_pval, output_file = "application_chen_and_yang_2019_sens.pdf")
+```
+
+## Application: Bursztyn et al (2020)
+
+```{r, eval=FALSE}
+Z <- bursztyn_et_al_2020$condition2
+Y <- bursztyn_et_al_2020$klk_index
+result <- application_wrapper(Z = Z, Y = Y, seed = 1)
+result.list <- list(result1 = result)
+
+# Generate LaTex table for p-value and CI
+make_latex_table(result.list)
+
+# Draw the sensitivity analysis plot
+plot_sens(sens_pval = result$sens_pval, output_file = "application_bursztyn_et_al_2020_sens.pdf")
+```
+
+## Application: Noy and Zhang (2023)
+
+```{r, eval=FALSE}
+result.list <- list()
+# outcome 1
+Z <- noy_and_zhang_2023$treatment
+Y <- -noy_and_zhang_2023$time_diff
+result.list[["time_diff"]] <- application_wrapper(Z = Z, Y = Y, seed = 1)
+
+# outcome 2
+Z <- noy_and_zhang_2023$treatment
+Y <- noy_and_zhang_2023$grade_diff
+result.list[["grade_diff"]] <- application_wrapper(Z = Z, Y = Y, seed = 1)
+
+# Generate LaTex table for p-value and CI
+make_latex_table(result.list)
+
+# Draw the sensitivity analysis plot
+# 1) time_diff
+plot_sens(sens_pval = result.list$time_diff$sens_pval, output_file = "application_noy_and_zhang_2023_time_diff_sens.pdf")
+  
+# 2) grade_diff
+plot_sens(sens_pval = result.list$grade_diff$sens_pval, output_file = "application_noy_and_zhang_2023_grade_diff_sens.pdf")
+```

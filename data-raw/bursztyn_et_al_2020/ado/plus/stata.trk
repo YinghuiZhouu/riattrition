@@ -1,0 +1,530 @@
+* 00000020
+*! version 1.0.0
+* Do not erase or edit this file
+* It is used by Stata to track the ado and help
+* files you have installed.
+
+S http://fmwww.bc.edu/repec/bocode/b
+N boottest.pkg
+D 13 May 2020
+U 8
+d 'BOOTTEST': module to provide fast execution of the wild bootstrap with null imposed
+d 
+d  boottest is a post-estimation command that offers fast execution
+d of the wild bootstrap (Wu 1986) with null imposed, as recommended
+d by Cameron, Gelbach, and Miller (2008) for estimates with
+d clustered standard errors and few clusters. It also performs the
+d “score bootstrap” (Kline and Santos 2012), which adapts the
+d wild approach to Maximum Likelihood estimators. Two wrappers,
+d waldtest and scoretest, give easy access to the classical Wald
+d (1943) and Rao (1948) score/Lagrange multiplier tests. boottest
+d works after regress, cnsreg, ivreg, ivregress, ivreg2 and most
+d Stata ML-based estimation commands. boottest offers inference
+d based on multi-way clustering after many Stata estimation
+d commands that do not otherwise support it. When bootstrapping, it
+d offers a choice of Rademacher, Mammen (1993), Webb (2014), and
+d standard normal weights. boottest requires Stata version 11.2 or
+d later and runs fastest in version 13 or later.
+d 
+d KW: wild bootstrap
+d KW: Cameron
+d KW: Gelbach
+d KW: Miller
+d KW: score bootstrap
+d KW: Rao LM test
+d KW: multi-way clustering
+d 
+d Requires: Stata version 13
+d 
+d Distribution-Date: 20200509
+d 
+d Author: David Roodman
+d Support: email david@@davidroodman.com
+d 
+f b/boottest.ado
+f b/boottest.mata
+f b/boottest.sthlp
+f a/artest.ado
+f s/scoretest.ado
+f w/waldtest.ado
+f l/lboottest.mlib
+e
+S http://fmwww.bc.edu/repec/bocode/e
+N estout.pkg
+D 13 May 2020
+U 9
+d 'ESTOUT': module to make regression tables
+d 
+d  estout produces a table of regression results from one or
+d several models for use with spreadsheets, LaTeX, HTML, or a
+d word-processor table. eststo stores a quick copy of the active
+d estimation results for later tabulation. esttab is a wrapper for
+d estout. It displays a pretty looking publication-style regression
+d table without much typing. estadd adds additional results to the
+d e()-returns for one or several models previously fitted and
+d stored. This package subsumes the previously circulated esto,
+d esta, estadd,  and estadd_plus. An earlier version of estout is
+d available  as estout1.
+d 
+d KW: estimates
+d KW: LaTeX
+d KW: HTML
+d KW: word processor
+d KW: output
+d 
+d Requires: Stata version 8.2
+d 
+d Distribution-Date: 20190613
+d 
+d Author: Ben Jann, University of Bern
+d Support: email jann@@soz.unibe.ch
+d 
+f _/_eststo.ado
+f _/_eststo.hlp
+f e/estadd.ado
+f e/estadd.hlp
+f e/estout.ado
+f e/estout.hlp
+f e/eststo.ado
+f e/eststo.hlp
+f e/estpost.ado
+f e/estpost.hlp
+f e/esttab.ado
+f e/esttab.hlp
+e
+S http://fmwww.bc.edu/repec/bocode/m
+N mhtexp.pkg
+D 13 May 2020
+U 10
+d 'MHTEXP': module to perform multiple hypothesis testing correction procedure
+d 
+d  mhtexp can be used to perform the MHT correction procedure
+d explained in List, Shaikh, Xu (2016) -
+d https://ideas.repec.org/p/feb/natura/00402.html
+d 
+d KW: experiments
+d KW: multiple hypothesis testing
+d KW: multiple treatments
+d KW: multiple outcomes
+d KW: multiple subgroups
+d KW: randomized control trial
+d KW: bootstrap
+d KW: balance
+d KW: software
+d 
+d Requires: Stata version 12
+d 
+d Distribution-Date: 20160313
+d 
+d Author: Joseph Seidel
+d Support: email seidel.jp@@gmail.com
+d 
+d Author: Yang Xu
+d Support: email yangxu.econ@@gmail.com
+d 
+f m/mhtexp.ado
+f m/mhtexp.sthlp
+f l/lmhtexp.mlib
+e
+S http://fmwww.bc.edu/repec/bocode/l
+N leebounds.pkg
+D 13 May 2020
+U 11
+d 'LEEBOUNDS': module for estimating Lee (2009) treatment effect bounds
+d 
+d  leebounds computes treatment effect bounds for samples with
+d non-random sample selection/attrition as proposed by Lee (Review
+d of Economic Studies, 2009). The lower and    upper bound,
+d respectively, correspond to extreme assumptions about the missing
+d information that are consistent with the observed data. As
+d opposed to parametric approaches to correcting for sample
+d selection bias, such as the classical Heckman (1979) estimator,
+d Lee (2009) bounds rest on very few assumptions, i.e. random
+d assignment of treatment and monotonicity. Monotonicity means that
+d the treatment status affects selection in just one direction.
+d That is, receiving a treatment makes selection either more or
+d less likely for any observation. In technical terms, the approach
+d rests on a trimming procedure. Either from below or from
+d above, the group (treatment, control) that suffers less from
+d sample attrition is trimmed at the quantile of the outcome
+d variable that corresponds to the share of 'excess observations'
+d in this group. Calculating group differentials in mean    outcome
+d yields the lower and the upper bound, respectively, for the
+d treatment effect depending on whether trimming is from below or
+d above.  leebounds    assumes that it is unknown, a priori, which
+d group (treatment, control) is subject to the higher selection
+d probability and estimates this from data    (see Lee, 2009:1090). d
+d KW:  sample selection bias
+d KW: attrition bias
+d KW: random assignment
+d 
+d Requires: Stata version 11
+d 
+d Distribution-Date: 20130725
+d 
+d Author: Harald Tauchmann , University of Erlangen-Nuremberg, Germany
+d Support: email harald.tauchmann@@fau.de
+d 
+f l/leebounds.ado
+f l/leebounds.sthlp
+e
+S http://fmwww.bc.edu/repec/bocode/b
+N binscatter.pkg
+D 13 May 2020
+U 12
+d 'BINSCATTER': module to generate binned scatterplots
+d 
+d  binscatter generates binned scatterplots, and is optimized for
+d speed in large  datasets.  Binned scatterplots provide a
+d non-parametric way of visualizing the relationship between two
+d variables.  With a large number of observations, a scatterplot
+d that plots every data point would become too crowded to interpret
+d visually.  binscatter groups the x-axis variable into equal-sized
+d bins, computes the mean of the x-axis and y-axis variables within
+d each bin, then creates a scatterplot of these data points.  It
+d provides built-in options to control for covariates before
+d plotting the relationship.  It will also plot fit lines based on
+d the underlying data, and can automatically handle regression
+d discontinuities.
+d 
+d KW: scatterplot
+d KW: data description
+d KW: regression discontinuity
+d 
+d Requires: Stata version 12.1
+d 
+d Distribution-Date: 20131124
+d 
+d Author: Michael Stepner
+d Support: email michaelstepner@@gmail.com
+d 
+f b/binscatter.ado
+f b/binscatter.sthlp
+e
+S http://fmwww.bc.edu/repec/bocode/i
+N ietoolkit.pkg
+D 29 Jun 2020
+U 13
+d 'IETOOLKIT': module providing commands specially developed for Impact Evaluations
+d 
+d  ietookit provides a set of commands that address different
+d aspects of data management and data analysis in relation to
+d Impact Evaluations. The list of commands will be extended
+d continuously, and suggestions on new commands are highly
+d appreciated. Some of the commands are related to standardized
+d practices developed at the World Bank’s unit for Impact
+d Evaluations (DIME) and might not apply to practices adopted at
+d other institutions. For these commands, the corresponding help
+d files provide justifications for the standardized practices
+d applied. ieduplicates and iecompdup are useful tools to identify
+d and correct for duplicates. iebaltab is a tool for multiple
+d treatment arm balance tables. ieboilstart standardizes the
+d boilerplate code at the top of all do-files. iegraph produces
+d graphs based on common impact evaluation regression models. See
+d https://github.com/worldbank/ietoolkit for more details.
+d 
+d KW: impact evaluations
+d KW: data management
+d KW: survey data
+d KW: data analysis
+d KW: balance tables
+d KW: difference-in-differences
+d KW: matching
+d 
+d Requires: Stata version 11
+d 
+d Distribution-Date: 20191108
+d 
+d Author: DIME Analytics, The World Bank, DECIE
+d Support: email  lcardosodeandrad@@worldbank.org
+d 
+f i/ietoolkit.ado
+f i/ietoolkit.sthlp
+f i/iebaltab.ado
+f i/iebaltab.sthlp
+f i/ieboilsave.ado
+f i/ieboilsave.sthlp
+f i/ieboilstart.ado
+f i/ieboilstart.sthlp
+f i/ieddtab.ado
+f i/ieddtab.sthlp
+f i/iedropone.ado
+f i/iedropone.sthlp
+f i/iefolder.ado
+f i/iefolder.sthlp
+f i/iegitaddmd.ado
+f i/iegitaddmd.sthlp
+f i/iegraph.ado
+f i/iegraph.sthlp
+f i/iekdensity.ado
+f i/iekdensity.sthlp
+f i/iematch.ado
+f i/iematch.sthlp
+e
+S http://staskolenikov.net/stata
+N polychoric.pkg
+D 29 Jun 2020
+U 14
+d polychoric -- The polychoric correlation package
+d 
+d Author: Stas Kolenikov, skolenik@unc.edu
+d 
+d This package provides routines to estimate
+d the polychoric, tetrachoric, polyserial and biserial
+d correlations and use them in principal component analysis.
+d Current version: 1.4
+f p/polychoric.ado
+f p/polychoricpca.ado
+f p/polych_ll.ado
+f p/polyser_ll.ado
+f p/polychoric.hlp
+f p/polychoricpca.hlp
+e
+S http://fmwww.bc.edu/repec/bocode/b
+N boottest.pkg
+D 29 Jun 2020
+U 15
+d 'BOOTTEST': module to provide fast execution of the wild bootstrap with null imposed
+d 
+d  boottest is a post-estimation command that offers fast execution
+d of the wild bootstrap (Wu 1986) with null imposed, as recommended
+d by Cameron, Gelbach, and Miller (2008) for estimates with
+d clustered standard errors and few clusters. It also performs the
+d “score bootstrap” (Kline and Santos 2012), which adapts the
+d wild approach to Maximum Likelihood estimators. Two wrappers,
+d waldtest and scoretest, give easy access to the classical Wald
+d (1943) and Rao (1948) score/Lagrange multiplier tests. boottest
+d works after regress, cnsreg, ivreg, ivregress, ivreg2 and most
+d Stata ML-based estimation commands. boottest offers inference
+d based on multi-way clustering after many Stata estimation
+d commands that do not otherwise support it. When bootstrapping, it
+d offers a choice of Rademacher, Mammen (1993), Webb (2014), and
+d standard normal weights. boottest requires Stata version 11.2 or
+d later and runs fastest in version 13 or later.
+d 
+d KW: wild bootstrap
+d KW: Cameron
+d KW: Gelbach
+d KW: Miller
+d KW: score bootstrap
+d KW: Rao LM test
+d KW: multi-way clustering
+d 
+d Requires: Stata version 13
+d 
+d Distribution-Date: 20200509
+d 
+d Author: David Roodman
+d Support: email david@@davidroodman.com
+d 
+f b/boottest.ado
+f b/boottest.mata
+f b/boottest.sthlp
+f a/artest.ado
+f s/scoretest.ado
+f w/waldtest.ado
+f l/lboottest.mlib
+e
+S http://fmwww.bc.edu/repec/bocode/b
+N boottest.pkg
+D 29 Jun 2020
+U 16
+d 'BOOTTEST': module to provide fast execution of the wild bootstrap with null imposed
+d 
+d  boottest is a post-estimation command that offers fast execution
+d of the wild bootstrap (Wu 1986) with null imposed, as recommended
+d by Cameron, Gelbach, and Miller (2008) for estimates with
+d clustered standard errors and few clusters. It also performs the
+d “score bootstrap” (Kline and Santos 2012), which adapts the
+d wild approach to Maximum Likelihood estimators. Two wrappers,
+d waldtest and scoretest, give easy access to the classical Wald
+d (1943) and Rao (1948) score/Lagrange multiplier tests. boottest
+d works after regress, cnsreg, ivreg, ivregress, ivreg2 and most
+d Stata ML-based estimation commands. boottest offers inference
+d based on multi-way clustering after many Stata estimation
+d commands that do not otherwise support it. When bootstrapping, it
+d offers a choice of Rademacher, Mammen (1993), Webb (2014), and
+d standard normal weights. boottest requires Stata version 11.2 or
+d later and runs fastest in version 13 or later.
+d 
+d KW: wild bootstrap
+d KW: Cameron
+d KW: Gelbach
+d KW: Miller
+d KW: score bootstrap
+d KW: Rao LM test
+d KW: multi-way clustering
+d 
+d Requires: Stata version 13
+d 
+d Distribution-Date: 20200509
+d 
+d Author: David Roodman
+d Support: email david@@davidroodman.com
+d 
+f b/boottest.ado
+f b/boottest.mata
+f b/boottest.sthlp
+f a/artest.ado
+f s/scoretest.ado
+f w/waldtest.ado
+f l/lboottest.mlib
+e
+S http://fmwww.bc.edu/repec/bocode/b
+N boottest.pkg
+D 29 Jun 2020
+U 17
+d 'BOOTTEST': module to provide fast execution of the wild bootstrap with null imposed
+d 
+d  boottest is a post-estimation command that offers fast execution
+d of the wild bootstrap (Wu 1986) with null imposed, as recommended
+d by Cameron, Gelbach, and Miller (2008) for estimates with
+d clustered standard errors and few clusters. It also performs the
+d “score bootstrap” (Kline and Santos 2012), which adapts the
+d wild approach to Maximum Likelihood estimators. Two wrappers,
+d waldtest and scoretest, give easy access to the classical Wald
+d (1943) and Rao (1948) score/Lagrange multiplier tests. boottest
+d works after regress, cnsreg, ivreg, ivregress, ivreg2 and most
+d Stata ML-based estimation commands. boottest offers inference
+d based on multi-way clustering after many Stata estimation
+d commands that do not otherwise support it. When bootstrapping, it
+d offers a choice of Rademacher, Mammen (1993), Webb (2014), and
+d standard normal weights. boottest requires Stata version 11.2 or
+d later and runs fastest in version 13 or later.
+d 
+d KW: wild bootstrap
+d KW: Cameron
+d KW: Gelbach
+d KW: Miller
+d KW: score bootstrap
+d KW: Rao LM test
+d KW: multi-way clustering
+d 
+d Requires: Stata version 13
+d 
+d Distribution-Date: 20200509
+d 
+d Author: David Roodman
+d Support: email david@@davidroodman.com
+d 
+f b/boottest.ado
+f b/boottest.mata
+f b/boottest.sthlp
+f a/artest.ado
+f s/scoretest.ado
+f w/waldtest.ado
+f l/lboottest.mlib
+e
+S http://fmwww.bc.edu/repec/bocode/m
+N mhtexp.pkg
+D 29 Jun 2020
+U 18
+d 'MHTEXP': module to perform multiple hypothesis testing correction procedure
+d 
+d  mhtexp can be used to perform the MHT correction procedure
+d explained in List, Shaikh, Xu (2016) -
+d https://ideas.repec.org/p/feb/natura/00402.html
+d 
+d KW: experiments
+d KW: multiple hypothesis testing
+d KW: multiple treatments
+d KW: multiple outcomes
+d KW: multiple subgroups
+d KW: randomized control trial
+d KW: bootstrap
+d KW: balance
+d KW: software
+d 
+d Requires: Stata version 12
+d 
+d Distribution-Date: 20160313
+d 
+d Author: Joseph Seidel
+d Support: email seidel.jp@@gmail.com
+d 
+d Author: Yang Xu
+d Support: email yangxu.econ@@gmail.com
+d 
+f m/mhtexp.ado
+f m/mhtexp.sthlp
+f l/lmhtexp.mlib
+e
+S http://fmwww.bc.edu/repec/bocode/b
+N boottest.pkg
+D 29 Jun 2020
+U 19
+d 'BOOTTEST': module to provide fast execution of the wild bootstrap with null imposed
+d 
+d  boottest is a post-estimation command that offers fast execution
+d of the wild bootstrap (Wu 1986) with null imposed, as recommended
+d by Cameron, Gelbach, and Miller (2008) for estimates with
+d clustered standard errors and few clusters. It also performs the
+d “score bootstrap” (Kline and Santos 2012), which adapts the
+d wild approach to Maximum Likelihood estimators. Two wrappers,
+d waldtest and scoretest, give easy access to the classical Wald
+d (1943) and Rao (1948) score/Lagrange multiplier tests. boottest
+d works after regress, cnsreg, ivreg, ivregress, ivreg2 and most
+d Stata ML-based estimation commands. boottest offers inference
+d based on multi-way clustering after many Stata estimation
+d commands that do not otherwise support it. When bootstrapping, it
+d offers a choice of Rademacher, Mammen (1993), Webb (2014), and
+d standard normal weights. boottest requires Stata version 11.2 or
+d later and runs fastest in version 13 or later.
+d 
+d KW: wild bootstrap
+d KW: Cameron
+d KW: Gelbach
+d KW: Miller
+d KW: score bootstrap
+d KW: Rao LM test
+d KW: multi-way clustering
+d 
+d Requires: Stata version 13
+d 
+d Distribution-Date: 20200509
+d 
+d Author: David Roodman
+d Support: email david@@davidroodman.com
+d 
+f b/boottest.ado
+f b/boottest.mata
+f b/boottest.sthlp
+f a/artest.ado
+f s/scoretest.ado
+f w/waldtest.ado
+f l/lboottest.mlib
+e
+S http://fmwww.bc.edu/repec/bocode/m
+N mhtexp.pkg
+D 29 Jun 2020
+U 20
+d 'MHTEXP': module to perform multiple hypothesis testing correction procedure
+d 
+d  mhtexp can be used to perform the MHT correction procedure
+d explained in List, Shaikh, Xu (2016) -
+d https://ideas.repec.org/p/feb/natura/00402.html
+d 
+d KW: experiments
+d KW: multiple hypothesis testing
+d KW: multiple treatments
+d KW: multiple outcomes
+d KW: multiple subgroups
+d KW: randomized control trial
+d KW: bootstrap
+d KW: balance
+d KW: software
+d 
+d Requires: Stata version 12
+d 
+d Distribution-Date: 20160313
+d 
+d Author: Joseph Seidel
+d Support: email seidel.jp@@gmail.com
+d 
+d Author: Yang Xu
+d Support: email yangxu.econ@@gmail.com
+d 
+f m/mhtexp.ado
+f m/mhtexp.sthlp
+f l/lmhtexp.mlib
+e
