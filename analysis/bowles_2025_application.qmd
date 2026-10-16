@@ -138,6 +138,7 @@ source(file.path(package_dir, "R", "2_visualization.R"))
 library(dplyr)
 library(haven)
 library(knitr)
+library(fixest)
 
 survey_data <- read_dta(file.path(replication_dir, "Data", "survey_data.dta"))
 
@@ -234,7 +235,7 @@ kable(attrition_summary, digits = 3)
 
 
 ```{r}
-nperm <- 1000
+nperm <- 10000
 set.seed(11215)
 ```
 
@@ -247,6 +248,172 @@ For the paper comparison later on, these map to:
 
 - `Table F4`, pooled estimation, `Pooled treatment` row for discernment;
 - `Table F2`, pooled estimation, `Pooled treatment` row for treatment knowledge.
+
+For the regression-based attrition diagnostics later in the note, we use a
+compact set of baseline covariates drawn from the replication materials'
+sample-characteristics variables:
+
+- female;
+- urban residence;
+- four age-group indicators, with `55+` as the reference group; and
+- two education-group indicators, with `University` as the reference group.
+
+```{r}
+app_data <- app_data %>%
+  mutate(
+    female = dem_q2_1,
+    urban = dem_q5_1 + dem_q5_2,
+    age_18_24 = val_q2_1,
+    age_25_34 = val_q2_2,
+    age_35_44 = val_q2_3,
+    age_45_54 = val_q2_4,
+    age_55_plus = val_q2_5,
+    edu_primary = dem_q3_1,
+    edu_secondary = dem_q3_2,
+    edu_university = dem_q3_3
+  )
+
+diag_covars <- c(
+  "female",
+  "urban",
+  "age_18_24",
+  "age_25_34",
+  "age_35_44",
+  "age_45_54",
+  "edu_primary",
+  "edu_secondary"
+)
+
+diag_cov_labels <- c(
+  female = "Female",
+  urban = "Urban",
+  age_18_24 = "Age 18-24",
+  age_25_34 = "Age 25-34",
+  age_35_44 = "Age 35-44",
+  age_45_54 = "Age 45-54",
+  edu_primary = "Primary education",
+  edu_secondary = "Secondary education"
+)
+
+format_est_se <- function(model, term) {
+  ct <- coeftable(model)
+  if (!(term %in% rownames(ct))) return("")
+  sprintf("%.3f (%.3f)", ct[term, "Estimate"], ct[term, "Std. Error"])
+}
+
+format_term_label <- function(term) {
+  if (term == "(Intercept)") return("Constant")
+  if (term == "Z") return("Treatment")
+  if (grepl("^Z:", term)) {
+    base_term <- sub("^Z:", "", term)
+    return(paste0("Treatment x ", diag_cov_labels[[base_term]]))
+  }
+  diag_cov_labels[[term]]
+}
+
+wald_p_selected <- function(model, terms) {
+  b <- coef(model)
+  V <- vcov(model)
+  idx <- match(terms, names(b))
+  idx <- idx[!is.na(idx)]
+
+  if (length(idx) == 0) return(NA_real_)
+
+  R <- diag(length(b))[idx, , drop = FALSE]
+  RVRT <- R %*% V %*% t(R)
+
+  if (qr(RVRT)$rank < nrow(RVRT)) return(NA_real_)
+
+  W <- as.numeric(t(R %*% b) %*% solve(RVRT) %*% (R %*% b))
+  1 - pchisq(W, df = nrow(R))
+}
+
+run_group_missingness_table <- function(dat, y_var, covariates) {
+  fit_group <- function(z_value) {
+    dd <- dat %>%
+      mutate(M = as.integer(is.na(.data[[y_var]]))) %>%
+      filter(Z == z_value) %>%
+      select(M, all_of(covariates)) %>%
+      na.omit()
+
+    model <- feols(
+      as.formula(paste0("M ~ ", paste(covariates, collapse = " + "))),
+      data = dd,
+      vcov = "HC1"
+    )
+
+    list(model = model, n = nobs(model))
+  }
+
+  control_fit <- fit_group(0)
+  treat_fit <- fit_group(1)
+
+  tibble(term = covariates) %>%
+    mutate(
+      term_label = vapply(term, format_term_label, character(1)),
+      control_group = vapply(term, function(x) format_est_se(control_fit$model, x), character(1)),
+      treatment_group = vapply(term, function(x) format_est_se(treat_fit$model, x), character(1))
+    ) %>%
+    select(term_label, control_group, treatment_group) %>%
+    bind_rows(
+      tibble(
+        term_label = "Constant",
+        control_group = format_est_se(control_fit$model, "(Intercept)"),
+        treatment_group = format_est_se(treat_fit$model, "(Intercept)")
+      ),
+      tibble(
+        term_label = "N",
+        control_group = as.character(control_fit$n),
+        treatment_group = as.character(treat_fit$n)
+      )
+    )
+}
+
+run_missingness_regression_pair <- function(dat, y_var, covariates) {
+  dd <- dat %>%
+    mutate(M = as.integer(is.na(.data[[y_var]]))) %>%
+    select(M, Z, all_of(covariates)) %>%
+    na.omit()
+
+  model_a <- feols(
+    as.formula(paste0("M ~ ", paste(covariates, collapse = " + "))),
+    data = dd,
+    vcov = "HC1"
+  )
+
+  model_b <- feols(
+    as.formula(paste0("M ~ Z * (", paste(covariates, collapse = " + "), ")")),
+    data = dd,
+    vcov = "HC1"
+  )
+
+  table_df <- tibble(term = c(covariates, "Z", paste0("Z:", covariates))) %>%
+    mutate(
+      term_label = vapply(term, format_term_label, character(1)),
+      reg_a = vapply(term, function(x) format_est_se(model_a, x), character(1)),
+      reg_b = vapply(term, function(x) format_est_se(model_b, x), character(1))
+    ) %>%
+    select(term_label, reg_a, reg_b) %>%
+    bind_rows(
+      tibble(
+        term_label = "Constant",
+        reg_a = format_est_se(model_a, "(Intercept)"),
+        reg_b = format_est_se(model_b, "(Intercept)")
+      ),
+      tibble(
+        term_label = "N",
+        reg_a = as.character(nobs(model_a)),
+        reg_b = as.character(nobs(model_b))
+      )
+    )
+
+  list(
+    table = table_df,
+    p_all_x = wald_p_selected(model_a, covariates),
+    p_all_xz = wald_p_selected(model_b, paste0("Z:", covariates))
+  )
+}
+```
 
 ## Direct Wrapper Application with `ri_sharp_attrition()`
 
@@ -467,7 +634,7 @@ bind_rows(
   discernment outcome is higher in treatment than in control, and the observed
   Wilcoxon rank-sum statistic is about `1682.755`. The corresponding blocked
   complete-case null distribution is much farther left, roughly from `1657.510`
-  to `1668.716`, so none of the `1000` null draws is at least as large as the
+  to `1668.716`, so none of the `10000` null draws is at least as large as the
   observed statistic. That is why the empirical p-value is `0.000`.
 - Under `analysis = "general"`, the test keeps all `8947` randomized units and
   applies the package's most conservative completion rule under general
@@ -477,7 +644,7 @@ bind_rows(
   `-Inf`, while the missing control outcomes are placed at `Inf`. This pushes
   the observed rank-sum statistic sharply downward to about `2665.175`, whereas
   the blocked general-missingness null distribution is much farther right,
-  roughly from `3289.456` to `3303.063`. Every one of the `1000` null draws is
+  roughly from `3289.456` to `3303.063`. Every one of the `10000` null draws is
   at least as large as the observed statistic, so the empirical p-value is
   `1.000`.
 
@@ -823,7 +990,7 @@ readable, we use one compact helper that runs the same sequence of functions and
 stores the intermediate results.
 
 ```{r}
-run_manual_general_rs <- function(Y, Z, block, outcome_name, nperm = 1000) {
+run_manual_general_rs <- function(Y, Z, block, outcome_name, nperm = 10000) {
   counts <- .ri_missing_counts(Z = Z, Y = Y)
   block_diag <- .ri_block_diagnostics(Z = Z, Y = Y, block = block)
   Z.perm <- .ri_default_assignments(
@@ -1007,3 +1174,101 @@ comparison are answering different questions.
 - Under the default `general` assumption, the sharp-null test is extremely
   conservative because missing treated outcomes are sent to `-Inf` and missing
   control outcomes are sent to `Inf`.
+
+## Regression-based Attrition Diagnostics
+
+The randomization-inference results above ask what can be learned once missing
+outcomes are treated as part of the inferential problem. This section adds two
+conventional regression-based diagnostics for the same binary `Control` versus
+`Pooled treatment` mapping.
+
+### Regressions by experimental group
+
+These tables mirror the spirit of Gerber and Green's Table 7.5 by estimating
+separate missingness regressions within the control and treatment groups. Here
+`M = 1` means the endline outcome is missing.
+
+#### Discernment
+
+```{r}
+discernment_group_table <- run_group_missingness_table(
+  dat = app_data,
+  y_var = "end_icw_discernment",
+  covariates = diag_covars
+)
+
+kable(
+  discernment_group_table,
+  col.names = c("Covariate", "Control group", "Treatment group"),
+  caption = "Discernment missingness regressions by experimental group. Entries are OLS coefficients with HC1 standard errors in parentheses."
+)
+```
+
+#### Treatment knowledge
+
+```{r}
+treat_knowledge_group_table <- run_group_missingness_table(
+  dat = app_data,
+  y_var = "end_icw_treat_knowledge",
+  covariates = diag_covars
+)
+
+kable(
+  treat_knowledge_group_table,
+  col.names = c("Covariate", "Control group", "Treatment group"),
+  caption = "Treatment-knowledge missingness regressions by experimental group. Entries are OLS coefficients with HC1 standard errors in parentheses."
+)
+```
+
+### Missingness regressions with and without interactions
+
+These pooled regressions ask two related questions:
+
+- do baseline covariates jointly predict missingness at all; and
+- do those covariate-missingness relationships differ by treatment status?
+
+#### Discernment
+
+```{r}
+discernment_reg_pair <- run_missingness_regression_pair(
+  dat = app_data,
+  y_var = "end_icw_discernment",
+  covariates = diag_covars
+)
+
+kable(
+  discernment_reg_pair$table,
+  col.names = c("Covariate", "Reg. (a): M on X", "Reg. (b): M on X, Z, and X x Z"),
+  caption = paste0(
+    "Discernment missingness regressions. Entries are OLS coefficients with HC1 standard errors in parentheses. ",
+    "Joint p-value for H0: all X coefficients in reg. (a) = 0 is ",
+    sprintf('%.3f', discernment_reg_pair$p_all_x),
+    ". Joint p-value for H0: all X x Z coefficients in reg. (b) = 0 is ",
+    sprintf('%.3f', discernment_reg_pair$p_all_xz),
+    "."
+  )
+)
+```
+
+#### Treatment knowledge
+
+```{r}
+treat_knowledge_reg_pair <- run_missingness_regression_pair(
+  dat = app_data,
+  y_var = "end_icw_treat_knowledge",
+  covariates = diag_covars
+)
+
+kable(
+  treat_knowledge_reg_pair$table,
+  col.names = c("Covariate", "Reg. (a): M on X", "Reg. (b): M on X, Z, and X x Z"),
+  caption = paste0(
+    "Treatment-knowledge missingness regressions. Entries are OLS coefficients with HC1 standard errors in parentheses. ",
+    "Joint p-value for H0: all X coefficients in reg. (a) = 0 is ",
+    sprintf('%.3f', treat_knowledge_reg_pair$p_all_x),
+    ". Joint p-value for H0: all X x Z coefficients in reg. (b) = 0 is ",
+    sprintf('%.3f', treat_knowledge_reg_pair$p_all_xz),
+    "."
+  )
+)
+```

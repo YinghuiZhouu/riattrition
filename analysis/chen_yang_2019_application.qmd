@@ -1,0 +1,898 @@
+---
+title: "Applying `riattrition` to Chen and Yang (2019)"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Purpose
+
+This note consolidates the Chen and Yang (2019) application into one main document.
+The goals are:
+
+- summarize the experiment and the original Table 3 analysis;
+- reproduce the paper's benchmark reduced-form estimates;
+- re-run the main contrasts using the updated `riattrition` package;
+- visualize how attrition changes the randomization distribution; and
+- bring the main attrition diagnostics into a single workflow.
+
+## File Locations
+
+```{r}
+data_path <- "/Users/yinghuizhou/Library/CloudStorage/Dropbox/Projects/intro_rand_inf_missing/0_paper and data survey/1_field experiments/datasets_potential/3 Chen and Yang -- Media censorship/panelsurvey_clean.dta"
+old_notes_dir <- "/Users/yinghuizhou/Library/CloudStorage/Dropbox/Projects/intro_rand_inf_missing/5_application_code_and_notes"
+lee_AE_path <- file.path(old_notes_dir, "lee_bounds_AE_vs_control.dta")
+lee_A_path <- file.path(old_notes_dir, "lee_bounds_A_vs_control.dta")
+lee_CE_path <- file.path(old_notes_dir, "lee_bounds_CE_vs_control.dta")
+
+list(
+  data_path = data_path,
+  old_notes_dir = old_notes_dir,
+  lee_AE_path = lee_AE_path,
+  lee_A_path = lee_A_path,
+  lee_CE_path = lee_CE_path
+)
+```
+
+## Summary of the Experiment
+
+### Substantive question
+
+Chen and Yang (2019) study whether access to uncensored information changes what
+Chinese university students know, believe, and intend to do politically. The
+paper focuses on the effects of media censorship by experimentally varying
+access to foreign news websites that are blocked by the Great Firewall.
+
+### Treatment arms
+
+The experiment includes four relevant arms:
+
+- `Control`: no new access and no newsletter encouragement.
+- `A` (Access only): students receive free VPN access but no direct encouragement to consume blocked foreign news.
+- `CE` (Encouragement only): students receive newsletters encouraging foreign news consumption, but no VPN access.
+- `AE` (Access plus encouragement): students receive both VPN access and newsletter encouragement.
+
+The contrast structure in Table 3 therefore centers on three two-arm
+comparisons:
+
+- `AE` versus `Control`
+- `A` versus `Control`
+- `CE` versus `Control`
+
+### Outcomes
+
+Table 3 reports reduced-form treatment effects for five standardized wave-3
+outcome families:
+
+1. media-related behaviors
+2. knowledge
+3. economic beliefs
+4. political attitudes
+5. behaviors and planned behaviors
+
+### Attrition in the paper
+
+The paper's main Table 3 analysis is a wave-3 respondent analysis. In other
+words, the published regression results condition on being observed at endline.
+The paper argues that attrition is unlikely to create serious bias because:
+
+- attrition does not differ significantly across treatment arms;
+- baseline and endline samples look similar on observables; and
+- baseline outcomes do not strongly predict later attrition.
+
+These are exactly the kinds of claims we want to revisit using the updated
+package and a more explicit missingness framework.
+
+## Load the Updated Package Code
+
+We source the local package code directly from the current repo.
+
+```{r, include=FALSE}
+source("../R/0_function_sharp_null.R")
+source("../R/0_function_sharp_null_twostep.R")
+source("../R/1_result_output.R")
+source("../R/2_visualization.R")
+```
+
+## Load Data and Libraries
+
+```{r, include=FALSE}
+library(dplyr)
+library(haven)
+library(fixest)
+library(knitr)
+library(tibble)
+library(purrr)
+
+raw_data <- read_dta(data_path)
+dim(raw_data)
+```
+
+## Harmonize Variables
+
+```{r}
+chen_yang <- raw_data %>%
+  rename(
+    Z_treatment_vpnonly = treatment_vpnonly,
+    Z_treatment_nlonly = treatment_nlonly,
+    Z_treatment_vpnnl = treatment_vpnnl,
+    Z_treatment_control = treatment_control,
+    D_prior_vpn_user = treatment_user,
+    Y_az_overall_a_w3 = az_overall_a_w3,
+    Y_az_overall_b_w3 = az_overall_b_w3,
+    Y_az_overall_c_w3 = az_overall_c_w3,
+    Y_az_overall_d_w3 = az_overall_d_w3,
+    Y_az_overall_e_w3 = az_overall_e_w3
+  )
+
+outcomes <- c(
+  "Y_az_overall_a_w3",
+  "Y_az_overall_b_w3",
+  "Y_az_overall_c_w3",
+  "Y_az_overall_d_w3",
+  "Y_az_overall_e_w3"
+)
+
+outcome_labels <- c(
+  "Media",
+  "Knowledge",
+  "Economic beliefs",
+  "Political attitudes",
+  "Behaviors / plans"
+)
+
+names(outcome_labels) <- outcomes
+
+covars_raw <- c(
+  "h_gender",
+  "h_birth_year",
+  "h_ethnicity_han",
+  "h_hukou_urban",
+  "h_religion_religious",
+  "h_ccp_member",
+  "h_university_elite",
+  "h_hs_track_science",
+  "h_department_ssh",
+  "h_birthplace_coastal",
+  "h_residence_coastal",
+  "h_domestic_english_atleast4",
+  "h_foreign_english_yes",
+  "h_travel_hktaiwan",
+  "h_travel_foreign_yes",
+  "h_siblings_total",
+  "h_father_edu_hsabove",
+  "h_mother_edu_hsabove",
+  "h_father_ccp",
+  "h_mother_ccp",
+  "h_work_father_govt",
+  "h_work_mother_govt",
+  "h_hh_income",
+  "h_az_preference_risk",
+  "h_az_preference_time",
+  "h_az_preference_altruism",
+  "h_az_preference_reciprocity"
+)
+
+covars <- intersect(covars_raw, names(chen_yang))
+
+length(covars)
+```
+
+## Application Strategy
+
+The updated package is designed around binary contrasts. That fits this
+application well because Chen and Yang's Table 3 already emphasizes three binary
+treatment-versus-control comparisons.
+
+The plan is:
+
+1. reproduce the paper's benchmark reduced-form estimates using the wave-3
+   respondent sample and the paper's restriction that drops prior VPN users;
+2. move to the full contrast sample, still dropping prior VPN users, and apply
+   `ri_sharp_attrition()` outcome by outcome;
+3. compare `general` missingness to a one-sided monotone assumption selected by
+   the observed attrition imbalance; and
+4. visualize the media outcome across all three contrasts using `plot_ri_test_stat()`.
+
+The package application treats each of the three Table 3 comparisons as a
+complete-randomization binary experiment.
+
+## Reusable Local Helpers
+
+The helpers below are not part of the package. They are only document-side
+convenience wrappers for repetitive tasks such as:
+
+- constructing the three binary contrasts;
+- looping over the five Table 3 outcomes; and
+- collecting selected fields from repeated package calls into compact tables.
+
+The actual inference in this note still comes from the package functions
+`ri_sharp_attrition()` and `plot_ri_test_stat()`.
+
+```{r}
+make_contrast <- function(dat, treat_var) {
+  dat %>%
+    filter(Z_treatment_control == 1 | .data[[treat_var]] == 1) %>%
+    mutate(Z = ifelse(.data[[treat_var]] == 1, 1L, 0L))
+}
+
+choose_monotone_assumption <- function(Y, Z) {
+  p_obs_treat <- mean(!is.na(Y[Z == 1]))
+  p_obs_control <- mean(!is.na(Y[Z == 0]))
+  if (p_obs_treat >= p_obs_control) "mp" else "mn"
+}
+
+extract_assumption_row <- function(out, assumption) {
+  assumption_col <- if ("Assumption" %in% names(out$results)) {
+    "Assumption"
+  } else {
+    "Missingness assumption"
+  }
+  idx <- which(out$results[[assumption_col]] == assumption)
+  if (length(idx) == 0) return(NULL)
+  out$results[idx, , drop = FALSE]
+}
+
+extract_result_value <- function(row, candidates) {
+  hit <- intersect(candidates, names(row))
+  if (length(hit) == 0) return(NA)
+  row[[hit[1]]][1]
+}
+
+format_result_ci <- function(row) {
+  if (is.null(row)) return(NA_character_)
+
+  if ("[95% C.I.]" %in% names(row)) {
+    return(row$`[95% C.I.]`[1])
+  }
+
+  if (all(c("CI lower", "CI upper") %in% names(row))) {
+    lower <- row$`CI lower`[1]
+    upper <- row$`CI upper`[1]
+    return(sprintf("[%s, %s]", format(lower, trim = TRUE), format(upper, trim = TRUE)))
+  }
+
+  NA_character_
+}
+
+format_est_se <- function(model, term) {
+  ct <- coeftable(model)
+  if (!(term %in% rownames(ct))) return("")
+  sprintf("%.3f (%.3f)", ct[term, "Estimate"], ct[term, "Std. Error"])
+}
+
+format_term_label <- function(term) {
+  if (term == "(Intercept)") return("Constant")
+  if (term == "Z") return("Treatment")
+  if (grepl("^Z:", term)) return(sub("^Z:", "Treatment × ", term))
+  term
+}
+
+wald_p_selected <- function(model, terms) {
+  b <- coef(model)
+  V <- vcov(model)
+  idx <- match(terms, names(b))
+  idx <- idx[!is.na(idx)]
+
+  if (length(idx) == 0) return(NA_real_)
+
+  R <- diag(length(b))[idx, , drop = FALSE]
+  RVRT <- R %*% V %*% t(R)
+
+  if (qr(RVRT)$rank < nrow(RVRT)) return(NA_real_)
+
+  W <- as.numeric(t(R %*% b) %*% solve(RVRT) %*% (R %*% b))
+  1 - pchisq(W, df = nrow(R))
+}
+
+run_original_rf <- function(dat, y_vars) {
+  lapply(y_vars, function(y) {
+    model <- feols(as.formula(paste0(y, " ~ Z")), data = dat, vcov = "HC1")
+    ct <- coeftable(model)
+    tibble(
+      outcome = y,
+      estimate = unname(ct["Z", "Estimate"]),
+      se = unname(ct["Z", "Std. Error"]),
+      p_value = unname(ct["Z", "Pr(>|t|)"])
+    )
+  }) %>% bind_rows()
+}
+
+run_package_application <- function(dat, y_vars, nperm = 10000) {
+  map_dfr(seq_along(y_vars), function(i) {
+    y <- y_vars[i]
+    set.seed(20260514 + i - 1)
+    mono_assumption <- choose_monotone_assumption(dat[[y]], dat$Z)
+    out <- ri_sharp_attrition(
+      Z = dat$Z,
+      Y = dat[[y]],
+      c = 0,
+      missing = mono_assumption,
+      class = "RS",
+      method.list = list(name = "Wilcoxon"),
+      nperm = nperm,
+      include_twostep = FALSE
+    )
+
+    general_row <- extract_assumption_row(out, "general")
+    mono_row <- extract_assumption_row(out, mono_assumption)
+
+    tibble(
+      outcome = y,
+      mono_assumption = mono_assumption,
+      n_total = out$counts$n_total,
+      n_missing = out$counts$n_miss,
+      attrition_rate = out$counts$attrition_rate_total,
+      p_obs_treat = out$counts$n_obs_treat / out$counts$n_treat,
+      p_obs_control = out$counts$n_obs_control / out$counts$n_control,
+      general_value = extract_result_value(general_row, c("Value", "Test stat. value")),
+      general_p = extract_result_value(general_row, c("P-value")),
+      general_ci = format_result_ci(general_row),
+      mono_value = extract_result_value(mono_row, c("Value", "Test stat. value")),
+      mono_p = extract_result_value(mono_row, c("P-value")),
+      mono_ci = format_result_ci(mono_row)
+    )
+  })
+}
+
+run_group_observability_table <- function(dat, covariates, m_var = "panelmerged_wave3") {
+  fit_group <- function(z_value) {
+    dd <- dat %>%
+      mutate(M = as.integer(.data[[m_var]] == 1)) %>%
+      filter(Z == z_value) %>%
+      select(M, all_of(covariates)) %>%
+      na.omit()
+
+    model <- feols(
+      as.formula(paste0("M ~ ", paste(covariates, collapse = " + "))),
+      data = dd,
+      vcov = "HC1"
+    )
+
+    list(model = model, n = nobs(model))
+  }
+
+  control_fit <- fit_group(0)
+  treat_fit <- fit_group(1)
+
+  tibble(term = covariates) %>%
+    mutate(
+      term_label = vapply(term, format_term_label, character(1)),
+      control_group = vapply(term, function(x) format_est_se(control_fit$model, x), character(1)),
+      treatment_group = vapply(term, function(x) format_est_se(treat_fit$model, x), character(1))
+    ) %>%
+    select(term_label, control_group, treatment_group) %>%
+    bind_rows(
+      tibble(
+        term_label = "Constant",
+        control_group = format_est_se(control_fit$model, "(Intercept)"),
+        treatment_group = format_est_se(treat_fit$model, "(Intercept)")
+      ),
+      tibble(
+        term_label = "N",
+        control_group = as.character(control_fit$n),
+        treatment_group = as.character(treat_fit$n)
+      )
+    )
+}
+
+run_missingness_regression_pair <- function(dat, covariates, m_var = "panelmerged_wave3") {
+  dd <- dat %>%
+    mutate(M = as.integer(.data[[m_var]] == 1)) %>%
+    select(M, Z, all_of(covariates)) %>%
+    na.omit()
+
+  model_a <- feols(
+    as.formula(paste0("M ~ ", paste(covariates, collapse = " + "))),
+    data = dd,
+    vcov = "HC1"
+  )
+
+  model_b <- feols(
+    as.formula(paste0("M ~ Z * (", paste(covariates, collapse = " + "), ")")),
+    data = dd,
+    vcov = "HC1"
+  )
+
+  terms_b <- c(covariates, "Z", paste0("Z:", covariates))
+  table_df <- tibble(term = c(covariates, "Z", paste0("Z:", covariates))) %>%
+    mutate(
+      term_label = vapply(term, format_term_label, character(1)),
+      reg_a = vapply(term, function(x) format_est_se(model_a, x), character(1)),
+      reg_b = vapply(term, function(x) format_est_se(model_b, x), character(1))
+    ) %>%
+    select(term_label, reg_a, reg_b) %>%
+    bind_rows(
+      tibble(
+        term_label = "Constant",
+        reg_a = format_est_se(model_a, "(Intercept)"),
+        reg_b = format_est_se(model_b, "(Intercept)")
+      ),
+      tibble(
+        term_label = "N",
+        reg_a = as.character(nobs(model_a)),
+        reg_b = as.character(nobs(model_b))
+      )
+    )
+
+  list(
+    table = table_df,
+    p_all_x = wald_p_selected(model_a, covariates),
+    p_all_xz = wald_p_selected(model_b, paste0("Z:", covariates))
+  )
+}
+```
+
+## Define Analysis Samples
+
+```{r}
+chen_table3 <- chen_yang %>%
+  filter(panelmerged_wave3 == 1) %>%
+  filter(D_prior_vpn_user != 1)
+
+chen_full <- chen_yang %>%
+  filter(D_prior_vpn_user != 1)
+
+contrast_AE_table3 <- make_contrast(chen_table3, "Z_treatment_vpnnl")
+contrast_A_table3 <- make_contrast(chen_table3, "Z_treatment_vpnonly")
+contrast_CE_table3 <- make_contrast(chen_table3, "Z_treatment_nlonly")
+
+contrast_AE_full <- make_contrast(chen_full, "Z_treatment_vpnnl")
+contrast_A_full <- make_contrast(chen_full, "Z_treatment_vpnonly")
+contrast_CE_full <- make_contrast(chen_full, "Z_treatment_nlonly")
+
+contrast_sizes <- tibble(
+  contrast = c("AE vs Control", "A vs Control", "CE vs Control"),
+  n_table3 = c(nrow(contrast_AE_table3), nrow(contrast_A_table3), nrow(contrast_CE_table3)),
+  n_full = c(nrow(contrast_AE_full), nrow(contrast_A_full), nrow(contrast_CE_full))
+)
+
+kable(contrast_sizes, digits = 0)
+```
+
+## Reproducing the Original Table 3 Benchmarks
+
+This section uses the paper's wave-3 respondent sample and drops prior VPN users.
+It therefore mirrors the conventional complete-case logic in the published table.
+
+```{r}
+rf_AE <- run_original_rf(contrast_AE_table3, outcomes) %>% mutate(contrast = "AE vs Control")
+rf_A <- run_original_rf(contrast_A_table3, outcomes) %>% mutate(contrast = "A vs Control")
+rf_CE <- run_original_rf(contrast_CE_table3, outcomes) %>% mutate(contrast = "CE vs Control")
+
+rf_all <- bind_rows(rf_AE, rf_A, rf_CE) %>%
+  mutate(outcome_label = outcome_labels[outcome]) %>%
+  select(contrast, outcome_label, estimate, se, p_value)
+
+kable(rf_all, digits = 3)
+```
+
+## Applying `ri_sharp_attrition()`
+
+This section moves to the full contrast sample, still excluding prior VPN users,
+and applies the updated package outcome by outcome. For each outcome:
+
+- `general` is always reported;
+- a one-sided monotone restriction is chosen from the observed arm-specific
+  observability rates; and
+- the package prints the corresponding finite-sample RI summaries.
+
+### AE vs Control
+
+```{r}
+set.seed(20260514)
+ae_media_direct <- ri_sharp_attrition(
+  Z = contrast_AE_full$Z,
+  Y = contrast_AE_full$Y_az_overall_a_w3,
+  c = 0,
+  missing = choose_monotone_assumption(
+    contrast_AE_full$Y_az_overall_a_w3,
+    contrast_AE_full$Z
+  ),
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  nperm = 10000,
+  include_twostep = FALSE
+)
+
+ae_media_direct
+```
+
+```{r}
+ae_results <- run_package_application(contrast_AE_full, outcomes, nperm = 10000) %>%
+  mutate(contrast = "AE vs Control", outcome_label = outcome_labels[outcome]) %>%
+  select(contrast, outcome_label, mono_assumption, attrition_rate,
+         p_obs_treat, p_obs_control, general_p, general_ci, mono_p, mono_ci)
+
+kable(ae_results, digits = 3)
+```
+
+### A vs Control
+
+```{r}
+set.seed(20260514)
+a_media_direct <- ri_sharp_attrition(
+  Z = contrast_A_full$Z,
+  Y = contrast_A_full$Y_az_overall_a_w3,
+  c = 0,
+  missing = choose_monotone_assumption(
+    contrast_A_full$Y_az_overall_a_w3,
+    contrast_A_full$Z
+  ),
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  nperm = 10000,
+  include_twostep = FALSE
+)
+
+a_media_direct
+```
+
+```{r}
+a_results <- run_package_application(contrast_A_full, outcomes, nperm = 10000) %>%
+  mutate(contrast = "A vs Control", outcome_label = outcome_labels[outcome]) %>%
+  select(contrast, outcome_label, mono_assumption, attrition_rate,
+         p_obs_treat, p_obs_control, general_p, general_ci, mono_p, mono_ci)
+
+kable(a_results, digits = 3)
+```
+
+### CE vs Control
+
+```{r}
+set.seed(20260514)
+ce_media_direct <- ri_sharp_attrition(
+  Z = contrast_CE_full$Z,
+  Y = contrast_CE_full$Y_az_overall_a_w3,
+  c = 0,
+  missing = choose_monotone_assumption(
+    contrast_CE_full$Y_az_overall_a_w3,
+    contrast_CE_full$Z
+  ),
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  nperm = 10000,
+  include_twostep = FALSE
+)
+
+ce_media_direct
+```
+
+```{r}
+ce_results <- run_package_application(contrast_CE_full, outcomes, nperm = 10000) %>%
+  mutate(contrast = "CE vs Control", outcome_label = outcome_labels[outcome]) %>%
+  select(contrast, outcome_label, mono_assumption, attrition_rate,
+         p_obs_treat, p_obs_control, general_p, general_ci, mono_p, mono_ci)
+
+kable(ce_results, digits = 3)
+```
+
+## Visualizing Inference
+
+This section uses the media outcome for all three contrasts so that
+`general`, `mp`, and `complete-case` inference can be compared directly.
+
+### AE vs Control: general missingness
+
+```{r, fig.width=9, fig.height=5}
+set.seed(11215)
+ae_media_general_plot <- plot_ri_test_stat(
+  Z = contrast_AE_full$Z,
+  Y = contrast_AE_full$Y_az_overall_a_w3,
+  c = 0,
+  missing = "general",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  nperm = 10000
+)
+```
+
+### AE vs Control: monotone positive missingness
+
+```{r, fig.width=9, fig.height=5}
+set.seed(11215)
+ae_media_mp_plot <- plot_ri_test_stat(
+  Z = contrast_AE_full$Z,
+  Y = contrast_AE_full$Y_az_overall_a_w3,
+  c = 0,
+  analysis = "mp",
+  missing = "mp",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  nperm = 10000
+)
+```
+
+### AE vs Control: complete-case analysis
+
+```{r, fig.width=9, fig.height=5}
+set.seed(11215)
+ae_media_complete_plot <- plot_ri_test_stat(
+  Z = contrast_AE_full$Z,
+  Y = contrast_AE_full$Y_az_overall_a_w3,
+  c = 0,
+  analysis = "complete-case",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  nperm = 10000
+)
+```
+
+```{r}
+bind_rows(
+  tibble(
+    analysis = ae_media_general_plot$mode_label,
+    assumption = ae_media_general_plot$assumption,
+    observed_statistic = ae_media_general_plot$stat_obs,
+    p_value = ae_media_general_plot$p_value,
+    design = ae_media_general_plot$design,
+    nperm = ae_media_general_plot$nperm
+  ),
+  tibble(
+    analysis = ae_media_mp_plot$mode_label,
+    assumption = ae_media_mp_plot$assumption,
+    observed_statistic = ae_media_mp_plot$stat_obs,
+    p_value = ae_media_mp_plot$p_value,
+    design = ae_media_mp_plot$design,
+    nperm = ae_media_mp_plot$nperm
+  ),
+  tibble(
+    analysis = ae_media_complete_plot$mode_label,
+    assumption = ae_media_complete_plot$assumption,
+    observed_statistic = ae_media_complete_plot$stat_obs,
+    p_value = ae_media_complete_plot$p_value,
+    design = ae_media_complete_plot$design,
+    nperm = ae_media_complete_plot$nperm
+  )
+) %>%
+  kable(digits = 3)
+```
+
+### A vs Control: general missingness
+
+```{r, fig.width=9, fig.height=5}
+set.seed(11215)
+a_media_general_plot <- plot_ri_test_stat(
+  Z = contrast_A_full$Z,
+  Y = contrast_A_full$Y_az_overall_a_w3,
+  c = 0,
+  missing = "general",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  nperm = 10000
+)
+```
+
+### A vs Control: monotone positive missingness
+
+```{r, fig.width=9, fig.height=5}
+set.seed(11215)
+a_media_mp_plot <- plot_ri_test_stat(
+  Z = contrast_A_full$Z,
+  Y = contrast_A_full$Y_az_overall_a_w3,
+  c = 0,
+  analysis = "mp",
+  missing = "mp",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  nperm = 10000
+)
+```
+
+### A vs Control: complete-case analysis
+
+```{r, fig.width=9, fig.height=5}
+set.seed(11215)
+a_media_complete_plot <- plot_ri_test_stat(
+  Z = contrast_A_full$Z,
+  Y = contrast_A_full$Y_az_overall_a_w3,
+  c = 0,
+  analysis = "complete-case",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  nperm = 10000
+)
+```
+
+```{r}
+bind_rows(
+  tibble(
+    analysis = a_media_general_plot$mode_label,
+    assumption = a_media_general_plot$assumption,
+    observed_statistic = a_media_general_plot$stat_obs,
+    p_value = a_media_general_plot$p_value,
+    design = a_media_general_plot$design,
+    nperm = a_media_general_plot$nperm
+  ),
+  tibble(
+    analysis = a_media_mp_plot$mode_label,
+    assumption = a_media_mp_plot$assumption,
+    observed_statistic = a_media_mp_plot$stat_obs,
+    p_value = a_media_mp_plot$p_value,
+    design = a_media_mp_plot$design,
+    nperm = a_media_mp_plot$nperm
+  ),
+  tibble(
+    analysis = a_media_complete_plot$mode_label,
+    assumption = a_media_complete_plot$assumption,
+    observed_statistic = a_media_complete_plot$stat_obs,
+    p_value = a_media_complete_plot$p_value,
+    design = a_media_complete_plot$design,
+    nperm = a_media_complete_plot$nperm
+  )
+) %>%
+  kable(digits = 3)
+```
+
+### CE vs Control: general missingness
+
+```{r, fig.width=9, fig.height=5}
+set.seed(11215)
+ce_media_general_plot <- plot_ri_test_stat(
+  Z = contrast_CE_full$Z,
+  Y = contrast_CE_full$Y_az_overall_a_w3,
+  c = 0,
+  missing = "general",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  nperm = 10000
+)
+```
+
+### CE vs Control: monotone positive missingness
+
+```{r, fig.width=9, fig.height=5}
+set.seed(11215)
+ce_media_mp_plot <- plot_ri_test_stat(
+  Z = contrast_CE_full$Z,
+  Y = contrast_CE_full$Y_az_overall_a_w3,
+  c = 0,
+  analysis = "mp",
+  missing = "mp",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  nperm = 10000
+)
+```
+
+### CE vs Control: complete-case analysis
+
+```{r, fig.width=9, fig.height=5}
+set.seed(11215)
+ce_media_complete_plot <- plot_ri_test_stat(
+  Z = contrast_CE_full$Z,
+  Y = contrast_CE_full$Y_az_overall_a_w3,
+  c = 0,
+  analysis = "complete-case",
+  class = "RS",
+  method.list = list(name = "Wilcoxon"),
+  nperm = 10000
+)
+```
+
+```{r}
+bind_rows(
+  tibble(
+    analysis = ce_media_general_plot$mode_label,
+    assumption = ce_media_general_plot$assumption,
+    observed_statistic = ce_media_general_plot$stat_obs,
+    p_value = ce_media_general_plot$p_value,
+    design = ce_media_general_plot$design,
+    nperm = ce_media_general_plot$nperm
+  ),
+  tibble(
+    analysis = ce_media_mp_plot$mode_label,
+    assumption = ce_media_mp_plot$assumption,
+    observed_statistic = ce_media_mp_plot$stat_obs,
+    p_value = ce_media_mp_plot$p_value,
+    design = ce_media_mp_plot$design,
+    nperm = ce_media_mp_plot$nperm
+  ),
+  tibble(
+    analysis = ce_media_complete_plot$mode_label,
+    assumption = ce_media_complete_plot$assumption,
+    observed_statistic = ce_media_complete_plot$stat_obs,
+    p_value = ce_media_complete_plot$p_value,
+    design = ce_media_complete_plot$design,
+    nperm = ce_media_complete_plot$nperm
+  )
+) %>%
+  kable(digits = 3)
+```
+
+## Attrition Diagnostics
+
+### Arm-specific observability
+
+```{r}
+diagnostic_overview <- bind_rows(
+  ae_results,
+  a_results,
+  ce_results
+) %>%
+  select(contrast, outcome_label, attrition_rate, p_obs_treat, p_obs_control, mono_assumption)
+
+kable(diagnostic_overview, digits = 3)
+```
+
+The remaining diagnostics use a single outcome-agnostic observability indicator,
+`M = 1{ observed at wave 3 }`. In this dataset, that indicator is identical to
+the missingness pattern for all five Table 3 outcome families, so it provides a
+clean summary of overall attrition.
+
+### Regressions by experimental group
+
+These tables follow the Gerber and Green template by estimating
+`M ~ X` separately within the control arm and the treatment arm.
+
+```{r}
+ae_group_table <- run_group_observability_table(contrast_AE_full, covars)
+a_group_table <- run_group_observability_table(contrast_A_full, covars)
+ce_group_table <- run_group_observability_table(contrast_CE_full, covars)
+
+kable(ae_group_table, caption = "AE vs Control", col.names = c("Covariate", "Control group", "Treatment group"))
+kable(a_group_table, caption = "A vs Control", col.names = c("Covariate", "Control group", "Treatment group"))
+kable(ce_group_table, caption = "CE vs Control", col.names = c("Covariate", "Control group", "Treatment group"))
+```
+
+### Missingness regressions with and without interactions
+
+The next tables report:
+
+- regression (a): `M ~ X`
+- regression (b): `M ~ X + Z + X * Z`
+
+For each contrast, the footnote reports:
+
+- a joint `p`-value for the null that all `X` coefficients in regression (a)
+  equal zero; and
+- a joint `p`-value for the null that all interaction coefficients `X * Z` in
+  regression (b) equal zero.
+
+```{r}
+ae_reg_pair <- run_missingness_regression_pair(contrast_AE_full, covars)
+a_reg_pair <- run_missingness_regression_pair(contrast_A_full, covars)
+ce_reg_pair <- run_missingness_regression_pair(contrast_CE_full, covars)
+
+kable(
+  ae_reg_pair$table,
+  caption = paste0(
+    "AE vs Control. Footnote: joint p-value for all X in regression (a) = ",
+    sprintf("%.3f", ae_reg_pair$p_all_x),
+    "; joint p-value for all X × Z in regression (b) = ",
+    sprintf("%.3f", ae_reg_pair$p_all_xz),
+    "."
+  ),
+  col.names = c("Term", "(a) M ~ X", "(b) M ~ X + Z + X × Z")
+)
+
+kable(
+  a_reg_pair$table,
+  caption = paste0(
+    "A vs Control. Footnote: joint p-value for all X in regression (a) = ",
+    sprintf("%.3f", a_reg_pair$p_all_x),
+    "; joint p-value for all X × Z in regression (b) = ",
+    sprintf("%.3f", a_reg_pair$p_all_xz),
+    "."
+  ),
+  col.names = c("Term", "(a) M ~ X", "(b) M ~ X + Z + X × Z")
+)
+
+kable(
+  ce_reg_pair$table,
+  caption = paste0(
+    "CE vs Control. Footnote: joint p-value for all X in regression (a) = ",
+    sprintf("%.3f", ce_reg_pair$p_all_x),
+    "; joint p-value for all X × Z in regression (b) = ",
+    sprintf("%.3f", ce_reg_pair$p_all_xz),
+    "."
+  ),
+  col.names = c("Term", "(a) M ~ X", "(b) M ~ X + Z + X × Z")
+)
+```

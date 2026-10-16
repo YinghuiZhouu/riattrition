@@ -17,18 +17,19 @@
 #'
 #' `plot_ri_test_stat()` draws the randomization null distribution, marks the
 #' observed test statistic, and highlights the right tail that determines the
-#' sharp-null p-value. It supports the package's `general` missingness
-#' procedure and an observed-only `complete-case` visualization mode.
+#' sharp-null p-value. It supports the package's `general`, `mp`, and `mn`
+#' missingness procedures as well as an observed-only `complete-case`
+#' visualization mode.
 #'
 #' @param Z Treatment assignment (\eqn{n \times 1} vector).
 #' @param Y Observed outcome (\eqn{n \times 1} vector, including `NA`s).
 #' @param c A scalar that specifies the sharp null hypothesis.
 #' @param analysis A string that specifies which inferential path to visualize:
-#'   `"general"` uses the package's general-missingness procedure, while
-#'   `"complete-case"` restricts the analysis to observed outcomes only.
-#' @param missing A string that specifies the missing mechanism. The current
-#'   visualization method uses `"general"` when `analysis = "general"`. It is
-#'   ignored when `analysis = "complete-case"`.
+#'   `"general"`, `"mp"`, and `"mn"` use the corresponding package procedure,
+#'   while `"complete-case"` restricts the analysis to observed outcomes only.
+#' @param missing A string that specifies the missing mechanism. When supplied,
+#'   this should match the requested attrition-aware `analysis`. It is ignored
+#'   when `analysis = "complete-case"`.
 #' @param class A string that specifies the class of test statistic for the
 #'   sharp-null procedure.
 #' @param method.list A list that specifies the choice of test statistic.
@@ -74,7 +75,7 @@
 #'   the null distribution, observed statistic, p-value, and plotting metadata.
 #' @export
 plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
-                              analysis = c("general", "complete-case"),
+                              analysis = c("general", "mp", "mn", "complete-case"),
                               method.list = list(name = "Wilcoxon"),
                               block = NULL,
                               cluster = NULL,
@@ -99,8 +100,8 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
   style <- match.arg(style)
   off_support <- match.arg(off_support)
 
-  if (identical(analysis, "general") && !identical(missing, "general")) {
-    stop("When analysis = \"general\", plot_ri_test_stat() currently supports only missing = \"general\".")
+  if (analysis %in% c("general", "mp", "mn") && !identical(missing, analysis)) {
+    stop("When analysis is attrition-aware, `missing` should match the requested analysis.")
   }
 
   viz <- .ri_visualization_data(
@@ -141,9 +142,9 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
   block.analysis <- analysis_data$block
   counts <- .ri_missing_counts(Z.analysis, Y.analysis)
   test_name <- .ri_test_label(class = class, method.list = method.list)
-  if (identical(analysis, "general")) {
+  if (analysis %in% c("general", "mp", "mn")) {
     Z.perm <- .ri_default_assignments(
-      Z = Z.analysis, Y = Y.analysis, missing = "general",
+      Z = Z.analysis, Y = Y.analysis, missing = analysis,
       block = block.analysis, nperm = nperm
     )
     stat.null <- null_dist(
@@ -151,11 +152,16 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
       method.list = method.list, Z.perm = Z.perm, nperm = nperm
     )
     sharp_details <- .ri_sharp_details(
-      Z = Z.analysis, Y = Y.analysis, c = c, missing = "general", class = class,
+      Z = Z.analysis, Y = Y.analysis, c = c, missing = analysis, class = class,
       method.list = method.list, stat.null = stat.null, Z.perm = Z.perm,
       nperm = nperm
     )
-    mode_label <- "general missingness"
+    mode_label <- switch(
+      analysis,
+      general = "general missingness",
+      mp = "monotone positive missingness",
+      mn = "monotone negative missingness"
+    )
   } else {
     Z.perm <- .ri_default_assignments(
       Z = Z.analysis, Y = Y.analysis, missing = "random",
@@ -177,7 +183,7 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
     list(
       call = match.call(),
       analysis = analysis,
-      assumption = if (identical(analysis, "general")) "general" else "complete-case",
+      assumption = if (identical(analysis, "complete-case")) "complete-case" else analysis,
       mode_label = mode_label,
       stat_null = stat.null,
       stat_obs = sharp_details$stat_obs,
@@ -367,6 +373,10 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
                                          stat_col, border, lwd,
                                          subtitle_line_1, subtitle_line_2,
                                          tail_note, obs_position, ...) {
+  old_par <- graphics::par(no.readonly = TRUE)
+  on.exit(graphics::par(old_par), add = TRUE)
+  graphics::par(mar = c(7.2, 4.4, 4.2, 1.2))
+
   if (identical(plot_data$style, "histogram")) {
     fill_cols <- rep(null_col, length(plot_data$hist_obj$counts))
     fill_cols[plot_data$hist_obj$mids >= x$stat_obs] <- tail_col
@@ -440,9 +450,9 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
                      length = 0.08, code = 2, col = stat_col, lwd = lwd, xpd = NA)
   }
 
-  graphics::mtext(xlab, side = 1, line = 1.8, cex = 1)
-  graphics::mtext(subtitle_line_1, side = 1, line = 3.4, cex = 0.9)
-  graphics::mtext(subtitle_line_2, side = 1, line = 4.6, cex = 0.9)
+  graphics::mtext(xlab, side = 1, line = 2.0, cex = 1)
+  graphics::mtext(subtitle_line_1, side = 1, line = 3.8, cex = 0.9)
+  graphics::mtext(subtitle_line_2, side = 1, line = 5.0, cex = 0.9)
   graphics::mtext(tail_note, side = 3, line = 0.2, cex = 0.78)
 }
 
@@ -468,7 +478,7 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
   } else {
     graphics::layout(matrix(c(1, 2), nrow = 1), widths = c(4.6, 1.4))
   }
-  graphics::par(oma = c(5.2, 4.2, 4.2, 1.2), mar = c(3.5, 2.5, 1.5, 0.3))
+  graphics::par(oma = c(6.2, 4.2, 4.2, 1.2), mar = c(3.5, 2.5, 1.5, 0.3))
 
   draw_obs_panel <- function() {
     graphics::plot(
@@ -561,10 +571,10 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
   }
 
   graphics::mtext(main, side = 3, outer = TRUE, line = 1.1, cex = 1.1)
-  graphics::mtext(xlab, side = 1, outer = TRUE, line = 1.6)
+  graphics::mtext(xlab, side = 1, outer = TRUE, line = 1.8)
   graphics::mtext(ylab, side = 2, outer = TRUE, line = 2.5)
-  graphics::mtext(subtitle_line_1, side = 1, outer = TRUE, line = 3.2, cex = 0.9)
-  graphics::mtext(subtitle_line_2, side = 1, outer = TRUE, line = 4.3, cex = 0.9)
+  graphics::mtext(subtitle_line_1, side = 1, outer = TRUE, line = 3.6, cex = 0.9)
+  graphics::mtext(subtitle_line_2, side = 1, outer = TRUE, line = 4.8, cex = 0.9)
   graphics::mtext(tail_note, side = 3, outer = TRUE, line = -0.2, cex = 0.78)
 }
 
