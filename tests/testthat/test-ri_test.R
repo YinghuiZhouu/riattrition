@@ -448,6 +448,6 @@ test_that("plot_ri_test_stat() restricts non-general assumptions in general mode
       missing = "mn",
       nperm = 100
     ),
-    "When analysis = \"general\""
+    "`missing` should match the requested analysis"
   )
 })
