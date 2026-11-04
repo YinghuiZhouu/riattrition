@@ -203,6 +203,27 @@ The plan is:
 The package application treats each of the three Table 3 comparisons as a
 complete-randomization binary experiment.
 
+All randomization p-values, confidence intervals, and figures below use
+10^4 Monte Carlo (MC) replications: `nperm` random re-assignments drawn under
+complete randomization.
+
+```{r}
+nperm <- 10^4
+mc_caption <- paste0("MC replications: ", format(nperm, big.mark = ",", scientific = FALSE))
+
+# Display only: rate columns are stored as proportions and shown as percentages.
+show_rates_as_pct <- function(df) {
+  rate_cols <- c(
+    `attrition_rate (%)` = "attrition_rate",
+    `p_obs_treat (%)` = "p_obs_treat",
+    `p_obs_control (%)` = "p_obs_control"
+  )
+  df %>%
+    mutate(across(any_of(unname(rate_cols)), ~ round(100 * .x, 1))) %>%
+    rename(any_of(rate_cols))
+}
+```
+
 ## Reusable Local Helpers
 
 The helpers below are not part of the package. They are only document-side
@@ -261,36 +282,6 @@ format_result_ci <- function(row) {
   NA_character_
 }
 
-format_est_se <- function(model, term) {
-  ct <- coeftable(model)
-  if (!(term %in% rownames(ct))) return("")
-  sprintf("%.3f (%.3f)", ct[term, "Estimate"], ct[term, "Std. Error"])
-}
-
-format_term_label <- function(term) {
-  if (term == "(Intercept)") return("Constant")
-  if (term == "Z") return("Treatment")
-  if (grepl("^Z:", term)) return(sub("^Z:", "Treatment × ", term))
-  term
-}
-
-wald_p_selected <- function(model, terms) {
-  b <- coef(model)
-  V <- vcov(model)
-  idx <- match(terms, names(b))
-  idx <- idx[!is.na(idx)]
-
-  if (length(idx) == 0) return(NA_real_)
-
-  R <- diag(length(b))[idx, , drop = FALSE]
-  RVRT <- R %*% V %*% t(R)
-
-  if (qr(RVRT)$rank < nrow(RVRT)) return(NA_real_)
-
-  W <- as.numeric(t(R %*% b) %*% solve(RVRT) %*% (R %*% b))
-  1 - pchisq(W, df = nrow(R))
-}
-
 run_original_rf <- function(dat, y_vars) {
   lapply(y_vars, function(y) {
     model <- feols(as.formula(paste0(y, " ~ Z")), data = dat, vcov = "HC1")
@@ -304,7 +295,7 @@ run_original_rf <- function(dat, y_vars) {
   }) %>% bind_rows()
 }
 
-run_package_application <- function(dat, y_vars, nperm = 10000) {
+run_package_application <- function(dat, y_vars, nperm = 10^4) {
   map_dfr(seq_along(y_vars), function(i) {
     y <- y_vars[i]
     set.seed(20260514 + i - 1)
@@ -341,90 +332,17 @@ run_package_application <- function(dat, y_vars, nperm = 10000) {
   })
 }
 
-run_group_observability_table <- function(dat, covariates, m_var = "panelmerged_wave3") {
-  fit_group <- function(z_value) {
-    dd <- dat %>%
-      mutate(M = as.integer(.data[[m_var]] == 1)) %>%
-      filter(Z == z_value) %>%
-      select(M, all_of(covariates)) %>%
-      na.omit()
+# Missingness regression diagnostics, shared with the other application notes.
+# M = 1 if the unit is observed at wave 3, as in Li, Sheng & Yu (2025).
+source("attrition_regressions.R")
+# Table captions go through Markdown: escape "*" so Y*_i(0) keeps its star.
+md_caption0 <- function(...) gsub("*", "\\*", paste0(...), fixed = TRUE)
 
-    model <- feols(
-      as.formula(paste0("M ~ ", paste(covariates, collapse = " + "))),
-      data = dd,
-      vcov = "HC1"
-    )
-
-    list(model = model, n = nobs(model))
-  }
-
-  control_fit <- fit_group(0)
-  treat_fit <- fit_group(1)
-
-  tibble(term = covariates) %>%
-    mutate(
-      term_label = vapply(term, format_term_label, character(1)),
-      control_group = vapply(term, function(x) format_est_se(control_fit$model, x), character(1)),
-      treatment_group = vapply(term, function(x) format_est_se(treat_fit$model, x), character(1))
-    ) %>%
-    select(term_label, control_group, treatment_group) %>%
-    bind_rows(
-      tibble(
-        term_label = "Constant",
-        control_group = format_est_se(control_fit$model, "(Intercept)"),
-        treatment_group = format_est_se(treat_fit$model, "(Intercept)")
-      ),
-      tibble(
-        term_label = "N",
-        control_group = as.character(control_fit$n),
-        treatment_group = as.character(treat_fit$n)
-      )
-    )
-}
-
-run_missingness_regression_pair <- function(dat, covariates, m_var = "panelmerged_wave3") {
-  dd <- dat %>%
-    mutate(M = as.integer(.data[[m_var]] == 1)) %>%
-    select(M, Z, all_of(covariates)) %>%
-    na.omit()
-
-  model_a <- feols(
-    as.formula(paste0("M ~ ", paste(covariates, collapse = " + "))),
-    data = dd,
-    vcov = "HC1"
-  )
-
-  model_b <- feols(
-    as.formula(paste0("M ~ Z * (", paste(covariates, collapse = " + "), ")")),
-    data = dd,
-    vcov = "HC1"
-  )
-
-  terms_b <- c(covariates, "Z", paste0("Z:", covariates))
-  table_df <- tibble(term = c(covariates, "Z", paste0("Z:", covariates))) %>%
-    mutate(
-      term_label = vapply(term, format_term_label, character(1)),
-      reg_a = vapply(term, function(x) format_est_se(model_a, x), character(1)),
-      reg_b = vapply(term, function(x) format_est_se(model_b, x), character(1))
-    ) %>%
-    select(term_label, reg_a, reg_b) %>%
-    bind_rows(
-      tibble(
-        term_label = "Constant",
-        reg_a = format_est_se(model_a, "(Intercept)"),
-        reg_b = format_est_se(model_b, "(Intercept)")
-      ),
-      tibble(
-        term_label = "N",
-        reg_a = as.character(nobs(model_a)),
-        reg_b = as.character(nobs(model_b))
-      )
-    )
-
-  list(
-    table = table_df,
-    p_all_x = wald_p_selected(model_a, covariates),
-    p_all_xz = wald_p_selected(model_b, paste0("Z:", covariates))
+observability_regressions <- function(dat, covariates, m_var = "panelmerged_wave3") {
+  attrition_regressions(
+    M = as.integer(dat[[m_var]] == 1),
+    Z = dat$Z,
+    X = dat[covariates]
   )
 }
 ```
@@ -497,7 +415,7 @@ ae_media_direct <- ri_sharp_attrition(
   ),
   class = "RS",
   method.list = list(name = "Wilcoxon"),
-  nperm = 10000,
+  nperm = nperm,
   include_twostep = FALSE
 )
 
@@ -505,12 +423,12 @@ ae_media_direct
 ```
 
 ```{r}
-ae_results <- run_package_application(contrast_AE_full, outcomes, nperm = 10000) %>%
+ae_results <- run_package_application(contrast_AE_full, outcomes, nperm = nperm) %>%
   mutate(contrast = "AE vs Control", outcome_label = outcome_labels[outcome]) %>%
   select(contrast, outcome_label, mono_assumption, attrition_rate,
          p_obs_treat, p_obs_control, general_p, general_ci, mono_p, mono_ci)
 
-kable(ae_results, digits = 3)
+kable(show_rates_as_pct(ae_results), digits = 3, caption = mc_caption)
 ```
 
 ### A vs Control
@@ -527,7 +445,7 @@ a_media_direct <- ri_sharp_attrition(
   ),
   class = "RS",
   method.list = list(name = "Wilcoxon"),
-  nperm = 10000,
+  nperm = nperm,
   include_twostep = FALSE
 )
 
@@ -535,12 +453,12 @@ a_media_direct
 ```
 
 ```{r}
-a_results <- run_package_application(contrast_A_full, outcomes, nperm = 10000) %>%
+a_results <- run_package_application(contrast_A_full, outcomes, nperm = nperm) %>%
   mutate(contrast = "A vs Control", outcome_label = outcome_labels[outcome]) %>%
   select(contrast, outcome_label, mono_assumption, attrition_rate,
          p_obs_treat, p_obs_control, general_p, general_ci, mono_p, mono_ci)
 
-kable(a_results, digits = 3)
+kable(show_rates_as_pct(a_results), digits = 3, caption = mc_caption)
 ```
 
 ### CE vs Control
@@ -557,7 +475,7 @@ ce_media_direct <- ri_sharp_attrition(
   ),
   class = "RS",
   method.list = list(name = "Wilcoxon"),
-  nperm = 10000,
+  nperm = nperm,
   include_twostep = FALSE
 )
 
@@ -565,12 +483,12 @@ ce_media_direct
 ```
 
 ```{r}
-ce_results <- run_package_application(contrast_CE_full, outcomes, nperm = 10000) %>%
+ce_results <- run_package_application(contrast_CE_full, outcomes, nperm = nperm) %>%
   mutate(contrast = "CE vs Control", outcome_label = outcome_labels[outcome]) %>%
   select(contrast, outcome_label, mono_assumption, attrition_rate,
          p_obs_treat, p_obs_control, general_p, general_ci, mono_p, mono_ci)
 
-kable(ce_results, digits = 3)
+kable(show_rates_as_pct(ce_results), digits = 3, caption = mc_caption)
 ```
 
 ## Visualizing Inference
@@ -589,7 +507,7 @@ ae_media_general_plot <- plot_ri_test_stat(
   missing = "general",
   class = "RS",
   method.list = list(name = "Wilcoxon"),
-  nperm = 10000
+  nperm = nperm
 )
 ```
 
@@ -605,7 +523,7 @@ ae_media_mp_plot <- plot_ri_test_stat(
   missing = "mp",
   class = "RS",
   method.list = list(name = "Wilcoxon"),
-  nperm = 10000
+  nperm = nperm
 )
 ```
 
@@ -620,7 +538,7 @@ ae_media_complete_plot <- plot_ri_test_stat(
   analysis = "complete-case",
   class = "RS",
   method.list = list(name = "Wilcoxon"),
-  nperm = 10000
+  nperm = nperm
 )
 ```
 
@@ -632,7 +550,7 @@ bind_rows(
     observed_statistic = ae_media_general_plot$stat_obs,
     p_value = ae_media_general_plot$p_value,
     design = ae_media_general_plot$design,
-    nperm = ae_media_general_plot$nperm
+    `MC replications` = ae_media_general_plot$mc_replications
   ),
   tibble(
     analysis = ae_media_mp_plot$mode_label,
@@ -640,7 +558,7 @@ bind_rows(
     observed_statistic = ae_media_mp_plot$stat_obs,
     p_value = ae_media_mp_plot$p_value,
     design = ae_media_mp_plot$design,
-    nperm = ae_media_mp_plot$nperm
+    `MC replications` = ae_media_mp_plot$mc_replications
   ),
   tibble(
     analysis = ae_media_complete_plot$mode_label,
@@ -648,7 +566,7 @@ bind_rows(
     observed_statistic = ae_media_complete_plot$stat_obs,
     p_value = ae_media_complete_plot$p_value,
     design = ae_media_complete_plot$design,
-    nperm = ae_media_complete_plot$nperm
+    `MC replications` = ae_media_complete_plot$mc_replications
   )
 ) %>%
   kable(digits = 3)
@@ -665,7 +583,7 @@ a_media_general_plot <- plot_ri_test_stat(
   missing = "general",
   class = "RS",
   method.list = list(name = "Wilcoxon"),
-  nperm = 10000
+  nperm = nperm
 )
 ```
 
@@ -681,7 +599,7 @@ a_media_mp_plot <- plot_ri_test_stat(
   missing = "mp",
   class = "RS",
   method.list = list(name = "Wilcoxon"),
-  nperm = 10000
+  nperm = nperm
 )
 ```
 
@@ -696,7 +614,7 @@ a_media_complete_plot <- plot_ri_test_stat(
   analysis = "complete-case",
   class = "RS",
   method.list = list(name = "Wilcoxon"),
-  nperm = 10000
+  nperm = nperm
 )
 ```
 
@@ -708,7 +626,7 @@ bind_rows(
     observed_statistic = a_media_general_plot$stat_obs,
     p_value = a_media_general_plot$p_value,
     design = a_media_general_plot$design,
-    nperm = a_media_general_plot$nperm
+    `MC replications` = a_media_general_plot$mc_replications
   ),
   tibble(
     analysis = a_media_mp_plot$mode_label,
@@ -716,7 +634,7 @@ bind_rows(
     observed_statistic = a_media_mp_plot$stat_obs,
     p_value = a_media_mp_plot$p_value,
     design = a_media_mp_plot$design,
-    nperm = a_media_mp_plot$nperm
+    `MC replications` = a_media_mp_plot$mc_replications
   ),
   tibble(
     analysis = a_media_complete_plot$mode_label,
@@ -724,7 +642,7 @@ bind_rows(
     observed_statistic = a_media_complete_plot$stat_obs,
     p_value = a_media_complete_plot$p_value,
     design = a_media_complete_plot$design,
-    nperm = a_media_complete_plot$nperm
+    `MC replications` = a_media_complete_plot$mc_replications
   )
 ) %>%
   kable(digits = 3)
@@ -741,7 +659,7 @@ ce_media_general_plot <- plot_ri_test_stat(
   missing = "general",
   class = "RS",
   method.list = list(name = "Wilcoxon"),
-  nperm = 10000
+  nperm = nperm
 )
 ```
 
@@ -757,7 +675,7 @@ ce_media_mp_plot <- plot_ri_test_stat(
   missing = "mp",
   class = "RS",
   method.list = list(name = "Wilcoxon"),
-  nperm = 10000
+  nperm = nperm
 )
 ```
 
@@ -772,7 +690,7 @@ ce_media_complete_plot <- plot_ri_test_stat(
   analysis = "complete-case",
   class = "RS",
   method.list = list(name = "Wilcoxon"),
-  nperm = 10000
+  nperm = nperm
 )
 ```
 
@@ -784,7 +702,7 @@ bind_rows(
     observed_statistic = ce_media_general_plot$stat_obs,
     p_value = ce_media_general_plot$p_value,
     design = ce_media_general_plot$design,
-    nperm = ce_media_general_plot$nperm
+    `MC replications` = ce_media_general_plot$mc_replications
   ),
   tibble(
     analysis = ce_media_mp_plot$mode_label,
@@ -792,7 +710,7 @@ bind_rows(
     observed_statistic = ce_media_mp_plot$stat_obs,
     p_value = ce_media_mp_plot$p_value,
     design = ce_media_mp_plot$design,
-    nperm = ce_media_mp_plot$nperm
+    `MC replications` = ce_media_mp_plot$mc_replications
   ),
   tibble(
     analysis = ce_media_complete_plot$mode_label,
@@ -800,7 +718,7 @@ bind_rows(
     observed_statistic = ce_media_complete_plot$stat_obs,
     p_value = ce_media_complete_plot$p_value,
     design = ce_media_complete_plot$design,
-    nperm = ce_media_complete_plot$nperm
+    `MC replications` = ce_media_complete_plot$mc_replications
   )
 ) %>%
   kable(digits = 3)
@@ -818,7 +736,7 @@ diagnostic_overview <- bind_rows(
 ) %>%
   select(contrast, outcome_label, attrition_rate, p_obs_treat, p_obs_control, mono_assumption)
 
-kable(diagnostic_overview, digits = 3)
+kable(show_rates_as_pct(diagnostic_overview), digits = 3)
 ```
 
 The remaining diagnostics use a single outcome-agnostic observability indicator,
@@ -828,17 +746,33 @@ clean summary of overall attrition.
 
 ### Regressions by experimental group
 
-These tables follow the Gerber and Green template by estimating
-`M ~ X` separately within the control arm and the treatment arm.
+These tables follow the Gerber and Green template by estimating `M ~ X`
+separately within the control arm and the treatment arm. As in Li, Sheng & Yu
+(2025), `M = 1` means the unit is observed at wave 3, so a positive coefficient
+means a higher probability of being observed (less attrition).
+
+The `Difference (T - C)` column reports, for each covariate, the
+treatment-group coefficient minus the control-group coefficient and its
+p-value. The last two rows give the slopes test (do the covariates predict `M`
+in the same way in both arms?) and the Chow test (do the two arms share the
+whole regression, constant included?).
 
 ```{r}
-ae_group_table <- run_group_observability_table(contrast_AE_full, covars)
-a_group_table <- run_group_observability_table(contrast_A_full, covars)
-ce_group_table <- run_group_observability_table(contrast_CE_full, covars)
+ae_ar <- observability_regressions(contrast_AE_full, covars)
+a_ar <- observability_regressions(contrast_A_full, covars)
+ce_ar <- observability_regressions(contrast_CE_full, covars)
 
-kable(ae_group_table, caption = "AE vs Control", col.names = c("Covariate", "Control group", "Treatment group"))
-kable(a_group_table, caption = "A vs Control", col.names = c("Covariate", "Control group", "Treatment group"))
-kable(ce_group_table, caption = "CE vs Control", col.names = c("Covariate", "Control group", "Treatment group"))
+group_kable <- function(ar, contrast) {
+  kable(
+    attrition_table(ar, type = "group"),
+    align = c("l", "r", "r", "r", "r"),
+    caption = md_caption0(contrast, ". ", attrition_table_note(ar, type = "group"))
+  )
+}
+
+group_kable(ae_ar, "AE vs Control")
+group_kable(a_ar, "A vs Control")
+group_kable(ce_ar, "CE vs Control")
 ```
 
 ### Missingness regressions with and without interactions
@@ -846,53 +780,74 @@ kable(ce_group_table, caption = "CE vs Control", col.names = c("Covariate", "Con
 The next tables report:
 
 - regression (a): `M ~ X`
-- regression (b): `M ~ X + Z + X * Z`
+- regression (b): `M ~ X + Z + Z × X`
 
-For each contrast, the footnote reports:
-
-- a joint `p`-value for the null that all `X` coefficients in regression (a)
-  equal zero; and
-- a joint `p`-value for the null that all interaction coefficients `X * Z` in
-  regression (b) equal zero.
+Each table note gives the joint tests: all `X` coefficients in regression (a)
+equal zero; all `Z × X` coefficients in regression (b) equal zero (slopes
+test); and `Z` together with all `Z × X` coefficients equal zero (Chow test).
 
 ```{r}
-ae_reg_pair <- run_missingness_regression_pair(contrast_AE_full, covars)
-a_reg_pair <- run_missingness_regression_pair(contrast_A_full, covars)
-ce_reg_pair <- run_missingness_regression_pair(contrast_CE_full, covars)
+pooled_kable <- function(ar, contrast) {
+  kable(
+    attrition_table(ar, type = "pooled"),
+    align = c("l", "r", "r"),
+    caption = md_caption0(contrast, ". ", attrition_table_note(ar, type = "pooled"))
+  )
+}
 
-kable(
-  ae_reg_pair$table,
-  caption = paste0(
-    "AE vs Control. Footnote: joint p-value for all X in regression (a) = ",
-    sprintf("%.3f", ae_reg_pair$p_all_x),
-    "; joint p-value for all X × Z in regression (b) = ",
-    sprintf("%.3f", ae_reg_pair$p_all_xz),
-    "."
-  ),
-  col.names = c("Term", "(a) M ~ X", "(b) M ~ X + Z + X × Z")
-)
-
-kable(
-  a_reg_pair$table,
-  caption = paste0(
-    "A vs Control. Footnote: joint p-value for all X in regression (a) = ",
-    sprintf("%.3f", a_reg_pair$p_all_x),
-    "; joint p-value for all X × Z in regression (b) = ",
-    sprintf("%.3f", a_reg_pair$p_all_xz),
-    "."
-  ),
-  col.names = c("Term", "(a) M ~ X", "(b) M ~ X + Z + X × Z")
-)
-
-kable(
-  ce_reg_pair$table,
-  caption = paste0(
-    "CE vs Control. Footnote: joint p-value for all X in regression (a) = ",
-    sprintf("%.3f", ce_reg_pair$p_all_x),
-    "; joint p-value for all X × Z in regression (b) = ",
-    sprintf("%.3f", ce_reg_pair$p_all_xz),
-    "."
-  ),
-  col.names = c("Term", "(a) M ~ X", "(b) M ~ X + Z + X × Z")
-)
+pooled_kable(ae_ar, "AE vs Control")
+pooled_kable(a_ar, "A vs Control")
+pooled_kable(ce_ar, "CE vs Control")
 ```
+
+### Are covariates linked to differential attrition also prognostic of Y?
+
+Differential attrition on a covariate can bias the comparison of observed
+outcomes only if that covariate also predicts the outcome. For the media
+outcome (`Y_az_overall_a_w3`) in each contrast we:
+
+1. regress `Y` on `X` among control-group units with observed outcomes, which
+   describes how the covariates predict `Y*_i(0)` (prognostic);
+2. put each covariate's differential-attrition coefficient (`Z × X` in the
+   missingness regression) next to its prognostic coefficient; and
+3. predict `Y*_i(0)` for every unit from step 1 and compare treated and
+   control units, first among all units in the contrast and then among units
+   with observed outcomes.
+
+```{r}
+media_prognostic <- function(dat) {
+  prognostic_check(Y = dat$Y_az_overall_a_w3, Z = dat$Z, X = dat[covars])
+}
+
+side_by_side_kable <- function(pc, contrast) {
+  kable(
+    prognostic_table(pc, type = "side_by_side"),
+    align = c("l", "r", "r", "r", "r"),
+    caption = md_caption0(contrast, ", media outcome: differential attrition and prognostic power by covariate. ",
+                     prognostic_table_note(pc, type = "side_by_side"))
+  )
+}
+
+score_kable <- function(pc, contrast) {
+  kable(
+    prognostic_table(pc, type = "score"),
+    align = c("l", "r", "r", "r"),
+    caption = md_caption0(contrast, ", media outcome: treated-minus-control differences in predicted Y*(0) and in observed Y. ",
+                     prognostic_table_note(pc, type = "score"))
+  )
+}
+
+ae_pc <- media_prognostic(contrast_AE_full)
+a_pc <- media_prognostic(contrast_A_full)
+ce_pc <- media_prognostic(contrast_CE_full)
+
+side_by_side_kable(ae_pc, "AE vs Control")
+score_kable(ae_pc, "AE vs Control")
+side_by_side_kable(a_pc, "A vs Control")
+score_kable(a_pc, "A vs Control")
+side_by_side_kable(ce_pc, "CE vs Control")
+score_kable(ce_pc, "CE vs Control")
+```
+
+These checks cover observed covariates only; unobserved factors can still drive
+differential attrition.

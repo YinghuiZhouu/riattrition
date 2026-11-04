@@ -1,0 +1,599 @@
+---
+title: "Applying `riattrition` to Scacco and Warren (2018)"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Purpose
+
+This note applies the `riattrition` package to:
+
+- Scacco, Alexandra, and Shana S. Warren. 2018. "Can Social Contact Reduce Prejudice and Discrimination? Evidence from a Field Experiment in Nigeria." *American Political Science Review* 112(3): 654-677.
+
+## File Locations
+
+```{r}
+paper_pdf <- "/Users/yinghuizhou/Library/CloudStorage/Dropbox/Projects/attrition application package/personal/paper/can-social-contact-reduce-prejudice-and-discrimination-evidence-from-a-field-experiment-in-nigeria.pdf"
+replication_dir <- "/Users/yinghuizhou/Library/CloudStorage/Dropbox/Projects/attrition application package/personal/paper/scacco_warren_replication"
+# Package root relative to this file (analysis/..), so each copy of this
+# document sources the R code that sits next to it.
+package_dir <- normalizePath("..")
+
+list(
+  paper_pdf = paper_pdf,
+  replication_dir = replication_dir,
+  package_dir = package_dir
+)
+```
+
+The replication files come from the APSR Dataverse
+(https://doi.org/10.7910/DVN/X8ZRVO): `Data_APSR.dta` (one row per respondent),
+`Data_APSR_long.dta` (one row per respondent and round of the behavioral games),
+and two Stata do-files.
+
+## Summary of the Experiment
+
+### Substantive question
+
+Can positive, cooperative contact between members of groups in conflict reduce
+prejudice (negative attitudes toward the other group) and discrimination
+(treating members of the other group worse)? Observational studies struggle with
+this question because prejudiced people may simply avoid contact with the other
+group. The authors therefore randomize contact.
+
+### Setting and sample
+
+The study takes place in Kaduna, a city in northern Nigeria with a long history
+of deadly Christian-Muslim riots (2000, 2002, 2011) and strong residential
+segregation between the two religious groups.
+
+- The authors selected the sixteen poorest neighborhoods among those that had
+  experienced violence in the past, divided them into 46 enumeration areas, and
+  randomly sampled households and respondents within them.
+- The sample is restricted to young men aged 18-25, the group that typically
+  takes part in riots.
+- In total, 849 Christian and Muslim young men were interviewed in a baseline
+  survey (August 2014).
+
+### The intervention
+
+The treatment is a free, 16-week computer-training course, the Urban Youth
+Vocational Training program (UYVT), run from September to December 2014 with a
+reputable local computer retailer.
+
+- Classes met twice a week (four hours per week, 29 sessions) at a central site.
+- Students worked in fixed pairs on a shared laptop throughout the course, with
+  many partner activities (designing flyers, researching topics, presentations).
+- The course contained **no** peace or anti-prejudice messaging; it was presented
+  as a skills program, which reduces the risk that participants guess the purpose
+  of the study.
+- Students received a small transport stipend, and regular attenders entered a
+  raffle for the course laptops (held after the endline survey).
+
+### What exactly was randomized?
+
+Randomization happened at three levels (Figure 1 of the paper):
+
+1. **Program (UYVT vs. control).** 549 of the 849 men were invited to the course
+   (Group A); the other 300 only took part in the surveys (Group B).
+2. **Class type, among those invited.** About two-thirds were assigned to
+   religiously mixed (heterogeneous) classes and one-third to single-religion
+   (homogeneous) classes (Groups C and D). There were 30 class sections: 20
+   heterogeneous and 10 homogeneous.
+3. **Partner type, within heterogeneous classes.** Students were paired either with
+   a partner of the same religion or of the other religion (Groups E and F).
+
+The paper reports that class and partner assignment were stratified on prior
+computer experience, educational attainment, and prior contact with the other
+group (p. 659). It does not report stratification for the program assignment, and
+the replication data contain no strata identifier.
+
+All analyses in the paper are intent-to-treat (ITT). Compliance was 84%: of the 549
+invited men, 5 declined at the baseline interview and 84 never attended a class.
+
+### Outcomes
+
+The endline survey (January 2015, four to six weeks after the course ended)
+measured two kinds of outcomes.
+
+**Prejudice (attitudes)** — three indices built from survey items that respondents
+filled in privately on answer sheets (Table 1 of the paper). Each index is the
+average of its items on a 1-5 scale, coded so that **higher values mean a more
+positive view of the other religious group**:
+
+- *Negative Attributes Index* (4 items): how well "arrogant", "unreasonable",
+  "ungrateful", and "fanatical" describe the other group (reverse-coded).
+- *Positive Attributes Index* (7 items): "friendly", "honest in business
+  dealings", "responsible", "good citizens", "peaceful", "dependable",
+  "intelligent in school".
+- *Out-group Evaluation Index* (3 items): placement of the other group on
+  five-point scales from lazy to hardworking, ignorant to worldly, and ungenerous
+  to charitable.
+
+**Discrimination (behavior)** — two games played over ten rounds each: a dictator
+game (how much of ₦100 a respondent gives to another participant) and a
+destruction game (how many of another participant's ₦50 notes a respondent
+destroys, receiving ₦10 for each note destroyed). In each round the other participant is randomly drawn
+from the respondent's own or the other religion.
+
+### Attrition
+
+Of the 849 baseline respondents, 795 were found for the endline survey, so 54
+(6%) are missing all endline outcomes. Attrition was lower among men invited to
+the course (4%) than in the control group (10%), because the study team could
+update course participants' contact information during the course. The paper
+reports no significant differences in attrition across class or partner types.
+
+The prejudice indices have a second source of missingness: an index is missing
+when too many of its items are unanswered. This is why Tables 2-4 of the paper use
+716, 780, and 762 respondents rather than all 795 who were found.
+
+### Main findings in the paper
+
+- **Prejudice (Tables 2-4):** no treatment reduces prejudice. The program effect on
+  the Negative Attributes Index is small and insignificant (0.07, SE 0.09), and the
+  effects on the Positive Attributes and Out-group Evaluation indices are small and
+  negative (both -0.11, SE 0.06, p < 0.10).
+- **Discrimination (Tables 5-7):** being invited to the course makes respondents
+  more generous to both groups, and being assigned to a heterogeneous class
+  reduces discrimination in the dictator game relative to homogeneous classes.
+
+## Application Strategy
+
+We apply the package to **Tables 2-4, column (1)**: the program effect (UYVT
+invitation vs. control) on each of the three prejudice indices in the full sample.
+
+- **Continuous outcomes.** The three prejudice indices are averages of Likert
+  items. (The game outcomes are counts of bills and are not used here.)
+- **Binary treatment and design.** `assign_AvB` = 1 if invited to the course. The
+  paper reports no stratification for this assignment, so we treat it as complete
+  randomization of 549 out of 849 men.
+- **Missing outcomes.** An index is missing either because the respondent was not
+  found at endline or because too many of its items are unanswered. The package
+  treats both as missing outcomes.
+- **Missingness assumptions.** We report `general` (no assumption) and `mp`
+  (monotone positive: being invited to the course never makes an outcome go
+  missing that would otherwise be observed). The paper's explanation for lower
+  attrition in the course group (updated contact information) points in the
+  direction of `mp`. Because missingness here also includes unanswered items, `mp`
+  requires that the invitation does not make anyone skip items they would
+  otherwise answer, which is a stronger requirement than for attrition alone.
+
+## Load the Package Code
+
+For this application, we directly source the package code from the `R/` folder of
+the repo that contains this document.
+
+```{r}
+source(file.path(package_dir, "R", "0_function_sharp_null.R"))
+source(file.path(package_dir, "R", "0_function_sharp_null_twostep.R"))
+source(file.path(package_dir, "R", "1_result_output.R"))
+source(file.path(package_dir, "R", "2_visualization.R"))
+source(file.path(package_dir, "analysis", "attrition_regressions.R"))
+```
+
+## Load Replication Data
+
+```{r}
+library(dplyr)
+library(haven)
+library(knitr)
+
+# Display helpers. Rates are stored as proportions and shown as percentages.
+fmt3 <- function(x) formatC(x, digits = 3, format = "f")
+fmt_n <- function(x) format(x, big.mark = ",", scientific = FALSE)
+fmt_pct <- function(x) sprintf("%.1f%%", 100 * x)
+# Table captions go through Markdown: escape "*" so Y*_i(0) keeps its star.
+md_caption <- function(...) gsub("*", "\\*", paste(...), fixed = TRUE)
+
+sw <- read_dta(file.path(replication_dir, "Data_APSR.dta"))
+dim(sw)
+```
+
+The respondent-level file keeps all 849 baseline respondents, including the 54 who
+were not found at endline. (The authors' own code drops them with
+`keep if available == 2` before the analysis.) The variables we use are:
+
+- `assign_AvB`: invited to the UYVT course (1) or control (0);
+- `available`: 1 = baseline only (not found at endline), 2 = baseline and endline;
+- `prejudice_negative_end`, `prejudice_positive_end`, `prejudice_eval_end`: the
+  three prejudice indices (missing when the respondent was not found or too many
+  items are unanswered);
+- `religion`: 0 = Muslim, 1 = Christian.
+
+```{r}
+outcomes <- c(
+  negative = "prejudice_negative_end",
+  positive = "prejudice_positive_end",
+  eval = "prejudice_eval_end"
+)
+outcome_labels <- c(
+  negative = "Negative Attributes Index",
+  positive = "Positive Attributes Index",
+  eval = "Out-group Evaluation Index"
+)
+
+table(UYVT = sw$assign_AvB, found_at_endline = sw$available == 2)
+```
+
+## Attrition Summary
+
+```{r}
+# Share of respondents not found at endline, by arm.
+attrition_by_arm <- sw %>%
+  group_by(UYVT = assign_AvB) %>%
+  summarise(
+    n = n(),
+    not_found = sum(available == 1),
+    `not found (%)` = 100 * mean(available == 1)
+  )
+kable(attrition_by_arm, digits = 1)
+
+# Share of respondents with a missing index (not found, or too many items
+# unanswered), by arm.
+missing_by_index <- data.frame(
+  index = outcome_labels,
+  missing_control = NA_real_,
+  missing_uyvt = NA_real_
+)
+for (k in seq_along(outcomes)) {
+  y <- sw[[outcomes[k]]]
+  missing_by_index$missing_control[k] <- mean(is.na(y[sw$assign_AvB == 0]))
+  missing_by_index$missing_uyvt[k] <- mean(is.na(y[sw$assign_AvB == 1]))
+}
+missing_by_index$difference <- missing_by_index$missing_uyvt - missing_by_index$missing_control
+
+kable(
+  data.frame(
+    Index = missing_by_index$index,
+    `Control (%)` = round(100 * missing_by_index$missing_control, 1),
+    `UYVT (%)` = round(100 * missing_by_index$missing_uyvt, 1),
+    `UYVT - control (pp)` = round(100 * missing_by_index$difference, 1),
+    check.names = FALSE
+  ),
+  caption = "Share of respondents with a missing index, by program assignment."
+)
+```
+
+In every index, outcomes are missing less often in the course group than in the
+control group, which is the pattern `mp` describes.
+
+## Applying `ri_sharp_attrition()`
+
+```{r}
+nperm <- 10^4
+```
+
+All randomization p-values and confidence intervals below use 10^4 Monte Carlo
+(MC) replications.
+
+### Negative Attributes Index (Table 2, column 1)
+
+```{r}
+set.seed(20181)
+negative_ri <- ri_sharp_attrition(
+  Z = sw$assign_AvB,
+  Y = sw$prejudice_negative_end,
+  missing = "mp",
+  nperm = nperm,
+  outcome_name = "prejudice_negative_end"
+)
+negative_ri
+```
+
+### Positive Attributes Index (Table 3, column 1)
+
+```{r}
+set.seed(20182)
+positive_ri <- ri_sharp_attrition(
+  Z = sw$assign_AvB,
+  Y = sw$prejudice_positive_end,
+  missing = "mp",
+  nperm = nperm,
+  outcome_name = "prejudice_positive_end"
+)
+positive_ri
+```
+
+### Out-group Evaluation Index (Table 4, column 1)
+
+```{r}
+set.seed(20183)
+eval_ri <- ri_sharp_attrition(
+  Z = sw$assign_AvB,
+  Y = sw$prejudice_eval_end,
+  missing = "mp",
+  nperm = nperm,
+  outcome_name = "prejudice_eval_end"
+)
+eval_ri
+```
+
+## Visualizing the Negative Attributes Index
+
+The histogram shows the randomization distribution of the Wilcoxon rank-sum
+statistic under the sharp null of no effect, with the observed statistic marked.
+Under `general`, missing outcomes in the course group are placed at the bottom and
+missing outcomes in the control group at the top; under `mp`, fewer outcomes have
+to be imputed in the least favorable way.
+
+```{r}
+set.seed(20181)
+negative_general_plot <- plot_ri_test_stat(
+  Z = sw$assign_AvB,
+  Y = sw$prejudice_negative_end,
+  analysis = "general",
+  missing = "general",
+  nperm = nperm
+)
+```
+
+```{r}
+set.seed(20181)
+negative_mp_plot <- plot_ri_test_stat(
+  Z = sw$assign_AvB,
+  Y = sw$prejudice_negative_end,
+  analysis = "mp",
+  missing = "mp",
+  nperm = nperm
+)
+```
+
+## Comparison with the Paper
+
+```{r}
+# Column (1) of Tables 2-4 in the paper: OLS coefficient on UYVT with robust SE.
+paper_coef <- c(negative = 0.07, positive = -0.11, eval = -0.11)
+paper_se <- c(negative = 0.09, positive = 0.06, eval = 0.06)
+paper_n <- c(negative = 716, positive = 780, eval = 762)
+
+paper_table <- data.frame(
+  Index = outcome_labels,
+  `Paper: UYVT coef. (SE)` = paste0(sprintf("%.2f", paper_coef), " (", sprintf("%.2f", paper_se), ")"),
+  `Paper N` = paper_n,
+  `Difference in observed means (UYVT - control)` = NA_character_,
+  `Observed N` = NA_integer_,
+  check.names = FALSE
+)
+for (k in names(outcomes)) {
+  y <- sw[[outcomes[k]]]
+  observed <- !is.na(y)
+  difference <- mean(y[observed & sw$assign_AvB == 1]) - mean(y[observed & sw$assign_AvB == 0])
+  paper_table[k, "Difference in observed means (UYVT - control)"] <- fmt3(difference)
+  paper_table[k, "Observed N"] <- sum(observed)
+}
+rownames(paper_table) <- NULL
+
+kable(paper_table, align = c("l", rep("r", 4)))
+```
+
+The "Observed N" column reproduces the paper's sample sizes, and the differences
+in observed means equal the paper's OLS coefficients up to rounding, since a
+regression on a single treatment indicator is a difference in means. The paper's
+tests use only these respondents (an implicit missing-at-random assumption). The
+randomization tests instead keep all 849 randomized respondents and state the
+assumption about missing outcomes explicitly.
+
+**Direction of the test.** The p-value from `ri_sharp_attrition()` is one-sided:
+it tests the sharp null of no effect against a *positive* effect (here: less
+prejudice). The paper's estimates for the Positive Attributes and Out-group
+Evaluation indices are negative, so we also report the one-sided p-value against
+a negative effect. It is obtained by applying the package to -Y: a negative effect
+on Y is a positive effect on -Y, and the missingness indicator does not change.
+
+```{r}
+# One-sided p-values against a negative effect: apply the package to -Y.
+# No confidence intervals are needed here, so include_ci = FALSE.
+less_results <- list()
+for (k in names(outcomes)) {
+  set.seed(20190)
+  less_ri <- ri_sharp_attrition(
+    Z = sw$assign_AvB,
+    Y = -as.numeric(sw[[outcomes[k]]]),
+    missing = "mp",
+    nperm = nperm,
+    include_ci = FALSE
+  )
+  less_results[[k]] <- less_ri$results
+}
+
+ri_results <- list(negative = negative_ri, positive = positive_ri, eval = eval_ri)
+
+ri_table <- NULL
+for (k in names(outcomes)) {
+  for (assumption in c("general", "mp")) {
+    greater_row <- ri_results[[k]]$results
+    greater_row <- greater_row[greater_row$`Missingness assumption` == assumption, ]
+    less_row <- less_results[[k]][less_results[[k]]$`Missingness assumption` == assumption, ]
+
+    ri_table <- rbind(ri_table, data.frame(
+      Index = outcome_labels[[k]],
+      `Missingness assumption` = .ri_assumption_labels[[assumption]],
+      `p-value, effect > 0` = .ri_pvalue(greater_row$`P-value`),
+      `p-value, effect < 0` = .ri_pvalue(less_row$`P-value`),
+      `95% CI for constant effect` = .ri_ci_text(greater_row$`CI lower`, greater_row$`CI upper`),
+      check.names = FALSE
+    ))
+  }
+}
+
+kable(
+  ri_table,
+  align = c("l", "l", "r", "r", "r"),
+  caption = paste(
+    "Randomization tests of the sharp null of no effect.",
+    "The confidence intervals are affected by ties in the outcomes;",
+    "see 'Ties and the confidence intervals' below."
+  )
+)
+```
+
+No test rejects the sharp null of no effect at the 5% level, in either direction
+and under either assumption. This matches the paper's conclusion that the program
+did not reduce prejudice. The paper's marginally significant negative estimates
+(p < 0.10) for the Positive Attributes and Out-group Evaluation indices do not
+survive once the missing outcomes are bounded, even under `mp`.
+
+### Ties and the confidence intervals
+
+The indices take few distinct values, so many respondents share the same value.
+The Wilcoxon statistic in the package ranks tied values by their row order
+(`ties.method = "first"`). Under the null of a constant effect c, the package
+subtracts c from the treated outcomes. When c is exactly 0, tied treated and
+control outcomes stay tied. When c is not 0, even by 0.001, every treated outcome
+moves just below or just above all control outcomes it was tied with, and the
+rank sum jumps.
+
+The table below shows this for the Out-group Evaluation Index (15 distinct
+values) under `mp`.
+
+```{r}
+# One-sided p-values for constant effects just below 0, at 0, and just above 0.
+eval_y <- as.numeric(sw$prejudice_eval_end)
+eval_z <- as.numeric(sw$assign_AvB)
+shifts <- c(-0.001, 0, 0.001)
+
+tie_check <- data.frame(
+  `Constant effect c` = shifts,
+  `p-value, effect > c` = NA_real_,
+  `p-value, effect < c` = NA_real_,
+  check.names = FALSE
+)
+for (i in seq_along(shifts)) {
+  set.seed(20183)
+  tie_check[i, 2] <- pval_sharp(eval_z, eval_y, c = shifts[i], missing = "mp", nperm = nperm)
+  # Against a smaller effect: apply the test to -Y and -c.
+  set.seed(20183)
+  tie_check[i, 3] <- pval_sharp(eval_z, -eval_y, c = -shifts[i], missing = "mp", nperm = nperm)
+}
+
+kable(tie_check, digits = 3)
+```
+
+Every c other than exactly 0 is rejected, so the 95% interval under `mp`
+collapses to [0, 0]. This does not mean the effect is estimated precisely. A
+constant additive effect does not fit an outcome that only takes a few values, and
+the interval reflects the ties rather than the information in the data. The
+intervals for the other two indices end near multiples of the item scale (for
+example 0.5 or 1/7) for the same reason. We therefore read the p-values at c = 0,
+not the confidence intervals, for this application.
+
+## Regression-based Attrition Diagnostics
+
+These diagnostics follow the other application notes. Here `M = 1` means the
+Negative Attributes Index is observed (as in Li, Sheng & Yu 2025); this index has
+the most missing values. The covariates are baseline characteristics with few
+missing values:
+
+- `religion`: Christian (1) vs. Muslim (0);
+- `a1_base`: age in years;
+- `a4_hausa_base`: Hausa is the home language;
+- `a16_simple_base`: educational attainment (0-3, recoded by the authors);
+- `prior_computer_use`: prior computer use (1-3, recoded by the authors);
+- `b4_base_simple`: relatively wealthy compared with the neighborhood.
+
+```{r}
+diag_covars <- c("religion", "a1_base", "a4_hausa_base", "a16_simple_base",
+                 "prior_computer_use", "b4_base_simple")
+diag_labels <- c(
+  religion = "Christian",
+  a1_base = "Age",
+  a4_hausa_base = "Hausa home language",
+  a16_simple_base = "Education (0-3)",
+  prior_computer_use = "Prior computer use (1-3)",
+  b4_base_simple = "Wealthier than neighborhood"
+)
+
+# zap_labels() turns the Stata-labelled columns into plain numbers.
+diag_data <- zap_labels(sw[c("assign_AvB", "prejudice_negative_end", diag_covars)])
+# Keep respondents with all six covariates recorded.
+diag_data <- diag_data[complete.cases(diag_data[diag_covars]), ]
+nrow(diag_data)
+
+negative_ar <- attrition_regressions(
+  M = as.integer(!is.na(diag_data$prejudice_negative_end)),
+  Z = diag_data$assign_AvB,
+  X = diag_data[diag_covars],
+  labels = diag_labels
+)
+```
+
+Respondents with a missing covariate are left out of these diagnostics, which
+leaves `r fmt_n(nrow(diag_data))` of the 849 respondents.
+
+### Regressions by experimental group
+
+```{r}
+kable(
+  attrition_table(negative_ar, type = "group"),
+  align = c("l", "r", "r", "r", "r"),
+  caption = md_caption(
+    "Negative Attributes Index: missingness regressions by program assignment.",
+    attrition_table_note(negative_ar, type = "group")
+  )
+)
+```
+
+### Missingness regressions with and without interactions
+
+```{r}
+kable(
+  attrition_table(negative_ar, type = "pooled"),
+  align = c("l", "r", "r"),
+  caption = md_caption(
+    "Negative Attributes Index: missingness regressions.",
+    attrition_table_note(negative_ar, type = "pooled")
+  )
+)
+```
+
+### Are covariates linked to differential attrition also prognostic of Y?
+
+```{r}
+negative_pc <- prognostic_check(
+  Y = diag_data$prejudice_negative_end,
+  Z = diag_data$assign_AvB,
+  X = diag_data[diag_covars],
+  labels = diag_labels
+)
+
+kable(
+  prognostic_table(negative_pc, type = "side_by_side"),
+  align = c("l", "r", "r", "r", "r"),
+  caption = md_caption(
+    "Negative Attributes Index: differential attrition and prognostic power by covariate.",
+    prognostic_table_note(negative_pc, type = "side_by_side")
+  )
+)
+
+kable(
+  prognostic_table(negative_pc, type = "score"),
+  align = c("l", "r", "r", "r"),
+  caption = md_caption(
+    "Negative Attributes Index: treated-minus-control differences in predicted Y*(0) and in observed Y.",
+    prognostic_table_note(negative_pc, type = "score")
+  )
+)
+```
+
+## Notes and Limitations
+
+- **Other comparisons.** The paper's main comparison of interest is heterogeneous
+  vs. homogeneous classes (`assign_CvD`, columns 4-6). That assignment was
+  stratified, but the replication data do not contain the strata, so a
+  randomization test could not reproduce the blocked design exactly. Attrition is
+  also similar across class types (about 4% in each).
+- **Ties.** The indices are averages of a few five-point items, so they take few
+  distinct values (24, 48, and 15). Because the Wilcoxon statistic breaks ties by
+  row order, the confidence intervals are not informative here (see above), and
+  the p-values can change slightly if the rows are reordered.
+- **Two kinds of missingness.** The analysis treats respondents who were not found
+  and respondents who skipped too many items in the same way. The `mp` assumption
+  must hold for both.

@@ -23,8 +23,9 @@ ri_sharp_attrition(
   alpha = 0.05,
   tol = 10^(-3),
   include_ci = TRUE,
-  include_twostep = NULL,
-  beta = 0.1 * alpha
+  include_twostep = FALSE,
+  beta = 0.1 * alpha,
+  outcome_name = NULL
 )
 }
 \arguments{
@@ -43,9 +44,9 @@ ri_sharp_attrition(
 \item{block}{An optional block identifier vector. If supplied, permutations are
 generated within blocks while preserving the treated count in each block.}
 
-\item{block_missing_sum}{A logical value indicating whether the printed block
-missingness section should include additional summaries beyond the default
-two-line display.}
+\item{block_missing_sum}{A logical value indicating whether the printed output
+should also show the distribution (median, IQR, range) of the within-block
+treatment - control missingness differences.}
 
 \item{cluster}{An optional cluster identifier vector. If supplied, the analysis
 treats clusters as the unit of analysis.}
@@ -65,7 +66,7 @@ missing if any individual outcome is missing.}
 
 \item{Z.perm}{An optional assignment matrix for the sharp-null procedure.}
 
-\item{nperm}{A positive integer that specifies the number of permutations.}
+\item{nperm}{A positive integer that specifies the number of Monte Carlo (MC) replications, i.e. random re-assignments drawn to approximate the randomization distribution (default 10^4).}
 
 \item{alpha}{A scalar, where \eqn{1-\alpha} indicates the confidence level.}
 
@@ -73,9 +74,11 @@ missing if any individual outcome is missing.}
 
 \item{include_ci}{A logical value indicating whether confidence intervals should be computed.}
 
-\item{include_twostep}{A logical value indicating whether the two-step procedure should be included.}
+\item{include_twostep}{A logical value indicating whether two-step rows should be added for \code{general}, \code{mp}, and \code{mn} (default \code{FALSE}).}
 
 \item{beta}{A real number in \eqn{[0, \alpha]} for the two-step procedure.}
+
+\item{outcome_name}{Name of the outcome shown in the printed output. By default it is taken from the \code{Y} argument, e.g. \code{data$y} gives \code{y}.}
 }
 \value{
 An object of class \code{riattrition_result}.
@@ -83,11 +86,12 @@ An object of class \code{riattrition_result}.
 \description{
 \code{ri_sharp_attrition()} wraps the existing sharp-null attrition inference
 functions and returns a richer result object with a default printed summary.
-The printed output emphasizes missingness counts and attrition rates, reports
-the observed test statistic, and omits regression-style columns such as
-standard errors and z-statistics. If \code{block} is supplied, the wrapper
-uses block-respecting permutation draws for the randomization distribution and
-reports simple block-level attrition diagnostics in the printed output.
+The printed output is a compact plain-text report: a header (outcome, design,
+test, sharp null), outcome missingness overall and by arm, one row of Monte
+Carlo p-value and confidence interval per missingness assumption, and notes
+explaining the assumptions shown. If \code{block} is supplied, the wrapper uses
+block-respecting permutation draws for the randomization distribution and also
+reports the block-weighted treatment - control missingness difference.
 If \code{cluster} is supplied, individual-level data are first aggregated to
 cluster-level outcomes, and inference treats clusters as the unit of analysis.
 }

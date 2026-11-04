@@ -23,7 +23,9 @@ This note applies the updated `riattrition` package to:
 ```{r}
 paper_pdf <- "/Users/yinghuizhou/Zotero/storage/K4VD7L2C/Bowles et al. - 2025 - Sustaining Exposure to Fact-Checks Misinformation Discernment, Media Consumption, and Its Political.pdf"
 replication_dir <- "/Users/yinghuizhou/Library/CloudStorage/Dropbox/Projects/intro_rand_inf_missing/0_paper and data survey/3_apsr_2016_2025/APSR 2021-2025/dataset_apsr_2021-2026/raw_downloads/row0018"
-package_dir <- "/Users/yinghuizhou/Library/CloudStorage/Dropbox/Projects/attrition application package/attrition application/riattrition"
+# Package root relative to this file (analysis/..), so each copy of this
+# document sources the R code that sits next to it.
+package_dir <- normalizePath("..")
 
 list(
   paper_pdf = paper_pdf,
@@ -123,7 +125,7 @@ The paper's main analyses often aggregate related survey items into inverse-cova
 
 ## Load the Updated Package Code
 
-For this application, we directly source the updated package code from the synchronized Dropbox package folder.
+For this application, we directly source the package code from the `R/` folder of the repo that contains this document.
 
 ```{r}
 source(file.path(package_dir, "R", "0_function_sharp_null.R"))
@@ -139,6 +141,15 @@ library(dplyr)
 library(haven)
 library(knitr)
 library(fixest)
+
+# Display helpers. Rates are stored as proportions and shown as percentages;
+# differences between rates are shown in percentage points (pp).
+fmt3 <- function(x) formatC(x, digits = 3, format = "f")
+fmt_n <- function(x) format(x, big.mark = ",", scientific = FALSE)
+fmt_pct <- function(x) sprintf("%.1f%%", 100 * x)
+fmt_pp <- function(x) sprintf("%.1f pp", 100 * x)
+# Table captions go through Markdown: escape "*" so Y*_i(0) keeps its star.
+md_caption <- function(...) gsub("*", "\\*", paste(...), fixed = TRUE)
 
 survey_data <- read_dta(file.path(replication_dir, "Data", "survey_data.dta"))
 
@@ -224,18 +235,21 @@ attrition_summary <- app_data %>%
     n = n(),
     endline_completed = sum(in_endline == 1, na.rm = TRUE),
     endline_missing = sum(in_endline == 0, na.rm = TRUE),
-    endline_completion_rate = mean(in_endline == 1, na.rm = TRUE)
+    `endline_completion_rate (%)` = 100 * mean(in_endline == 1, na.rm = TRUE)
   )
 
-kable(attrition_summary, digits = 3)
+kable(attrition_summary, digits = 1)
 ```
 
 
 ## Analysis Setup
 
+All randomization p-values, confidence intervals, and figures below use
+10^4 Monte Carlo (MC) replications: `nperm` random re-assignments drawn
+under the original blocked design.
 
 ```{r}
-nperm <- 10000
+nperm <- 10^4
 set.seed(11215)
 ```
 
@@ -254,163 +268,89 @@ compact set of baseline covariates drawn from the replication materials'
 sample-characteristics variables:
 
 - female;
-- urban residence;
-- four age-group indicators, with `55+` as the reference group; and
-- two education-group indicators, with `University` as the reference group.
+- urban or peri-urban residence, with rural as the reference group;
+- age-group indicators for 25-34, 35-44, and 45+ (45-54 and 55+ merged), with
+  18-24 as the reference group; and
+- education indicators for secondary or more and for university, with less
+  than secondary as the reference group.
 
 ```{r}
 app_data <- app_data %>%
   mutate(
     female = dem_q2_1,
     urban = dem_q5_1 + dem_q5_2,
-    age_18_24 = val_q2_1,
     age_25_34 = val_q2_2,
     age_35_44 = val_q2_3,
-    age_45_54 = val_q2_4,
-    age_55_plus = val_q2_5,
-    edu_primary = dem_q3_1,
-    edu_secondary = dem_q3_2,
+    age_45_plus = val_q2_4 + val_q2_5,
+    age_missing = as.integer(val_q2_1 + val_q2_2 + val_q2_3 + val_q2_4 + val_q2_5 == 0),
+    # The education variables record cumulative attainment (see below), so
+    # dem_q3_2 = 1 means secondary or more and dem_q3_3 = 1 means university.
+    edu_secondary_plus = dem_q3_2,
     edu_university = dem_q3_3
   )
 
 diag_covars <- c(
   "female",
   "urban",
-  "age_18_24",
   "age_25_34",
   "age_35_44",
-  "age_45_54",
-  "edu_primary",
-  "edu_secondary"
+  "age_45_plus",
+  "edu_secondary_plus",
+  "edu_university"
 )
 
 diag_cov_labels <- c(
   female = "Female",
-  urban = "Urban",
-  age_18_24 = "Age 18-24",
+  urban = "Urban or peri-urban",
   age_25_34 = "Age 25-34",
   age_35_44 = "Age 35-44",
-  age_45_54 = "Age 45-54",
-  edu_primary = "Primary education",
-  edu_secondary = "Secondary education"
+  age_45_plus = "Age 45+",
+  edu_secondary_plus = "Secondary education or more",
+  edu_university = "University education"
 )
 
-format_est_se <- function(model, term) {
-  ct <- coeftable(model)
-  if (!(term %in% rownames(ct))) return("")
-  sprintf("%.3f (%.3f)", ct[term, "Estimate"], ct[term, "Std. Error"])
-}
+covariate_counts <- with(app_data, list(
+  age_55_plus = sum(val_q2_5),
+  age_missing = sum(age_missing),
+  edu_nested = sum(dem_q3_3 == 1 & dem_q3_2 == 0) + sum(dem_q3_2 == 1 & dem_q3_1 == 0) == 0,
+  primary_share = mean(dem_q3_1 == 1),
+  below_secondary = sum(dem_q3_2 == 0),
+  no_edu = sum(dem_q3_1 + dem_q3_2 + dem_q3_3 == 0)
+))
 
-format_term_label <- function(term) {
-  if (term == "(Intercept)") return("Constant")
-  if (term == "Z") return("Treatment")
-  if (grepl("^Z:", term)) {
-    base_term <- sub("^Z:", "", term)
-    return(paste0("Treatment x ", diag_cov_labels[[base_term]]))
-  }
-  diag_cov_labels[[term]]
-}
+# Respondents with no recorded age group are left out of the covariate
+# regressions (an indicator for them would be fit by a handful of units).
+diag_data <- filter(app_data, age_missing == 0)
+```
 
-wald_p_selected <- function(model, terms) {
-  b <- coef(model)
-  V <- vcov(model)
-  idx <- match(terms, names(b))
-  idx <- idx[!is.na(idx)]
+Why this coding: only `r covariate_counts$age_55_plus` respondents in this
+sample are 55+, too few to serve as the reference group, so 55+ is merged with
+45-54. Another `r covariate_counts$age_missing` respondents have no recorded
+age group (all age indicators are 0). An indicator for them would be estimated
+from a handful of units (one or two in some regression samples), which makes
+its HC1 standard error and any joint test that includes it unreliable, so these
+respondents are left out of the regression diagnostics below
+(N = `r fmt_n(nrow(diag_data))`). The randomization tests use all
+`r fmt_n(nrow(app_data))` units, since they do not use covariates. The three education variables are nested rather than mutually
+exclusive (`r if (covariate_counts$edu_nested) "every" else "not every"`
+university respondent also has secondary = 1 and every secondary respondent
+also has primary = 1), and `r fmt_pct(covariate_counts$primary_share)` of
+respondents have primary = 1, so they record cumulative attainment. We
+therefore drop the primary indicator; the reference group is less than
+secondary (`r fmt_n(covariate_counts$below_secondary)` respondents, including
+`r covariate_counts$no_edu` with no education indicator).
 
-  if (length(idx) == 0) return(NA_real_)
+```{r}
+# Missingness regression diagnostics (shared with the other application notes).
+# M = 1 if the outcome is observed, as in Li, Sheng & Yu (2025).
+source(file.path(package_dir, "analysis", "attrition_regressions.R"))
 
-  R <- diag(length(b))[idx, , drop = FALSE]
-  RVRT <- R %*% V %*% t(R)
-
-  if (qr(RVRT)$rank < nrow(RVRT)) return(NA_real_)
-
-  W <- as.numeric(t(R %*% b) %*% solve(RVRT) %*% (R %*% b))
-  1 - pchisq(W, df = nrow(R))
-}
-
-run_group_missingness_table <- function(dat, y_var, covariates) {
-  fit_group <- function(z_value) {
-    dd <- dat %>%
-      mutate(M = as.integer(is.na(.data[[y_var]]))) %>%
-      filter(Z == z_value) %>%
-      select(M, all_of(covariates)) %>%
-      na.omit()
-
-    model <- feols(
-      as.formula(paste0("M ~ ", paste(covariates, collapse = " + "))),
-      data = dd,
-      vcov = "HC1"
-    )
-
-    list(model = model, n = nobs(model))
-  }
-
-  control_fit <- fit_group(0)
-  treat_fit <- fit_group(1)
-
-  tibble(term = covariates) %>%
-    mutate(
-      term_label = vapply(term, format_term_label, character(1)),
-      control_group = vapply(term, function(x) format_est_se(control_fit$model, x), character(1)),
-      treatment_group = vapply(term, function(x) format_est_se(treat_fit$model, x), character(1))
-    ) %>%
-    select(term_label, control_group, treatment_group) %>%
-    bind_rows(
-      tibble(
-        term_label = "Constant",
-        control_group = format_est_se(control_fit$model, "(Intercept)"),
-        treatment_group = format_est_se(treat_fit$model, "(Intercept)")
-      ),
-      tibble(
-        term_label = "N",
-        control_group = as.character(control_fit$n),
-        treatment_group = as.character(treat_fit$n)
-      )
-    )
-}
-
-run_missingness_regression_pair <- function(dat, y_var, covariates) {
-  dd <- dat %>%
-    mutate(M = as.integer(is.na(.data[[y_var]]))) %>%
-    select(M, Z, all_of(covariates)) %>%
-    na.omit()
-
-  model_a <- feols(
-    as.formula(paste0("M ~ ", paste(covariates, collapse = " + "))),
-    data = dd,
-    vcov = "HC1"
-  )
-
-  model_b <- feols(
-    as.formula(paste0("M ~ Z * (", paste(covariates, collapse = " + "), ")")),
-    data = dd,
-    vcov = "HC1"
-  )
-
-  table_df <- tibble(term = c(covariates, "Z", paste0("Z:", covariates))) %>%
-    mutate(
-      term_label = vapply(term, format_term_label, character(1)),
-      reg_a = vapply(term, function(x) format_est_se(model_a, x), character(1)),
-      reg_b = vapply(term, function(x) format_est_se(model_b, x), character(1))
-    ) %>%
-    select(term_label, reg_a, reg_b) %>%
-    bind_rows(
-      tibble(
-        term_label = "Constant",
-        reg_a = format_est_se(model_a, "(Intercept)"),
-        reg_b = format_est_se(model_b, "(Intercept)")
-      ),
-      tibble(
-        term_label = "N",
-        reg_a = as.character(nobs(model_a)),
-        reg_b = as.character(nobs(model_b))
-      )
-    )
-
-  list(
-    table = table_df,
-    p_all_x = wald_p_selected(model_a, covariates),
-    p_all_xz = wald_p_selected(model_b, paste0("Z:", covariates))
+missingness_regressions <- function(y_var) {
+  attrition_regressions(
+    M = as.integer(!is.na(diag_data[[y_var]])),
+    Z = diag_data$Z,
+    X = diag_data[diag_covars],
+    labels = diag_cov_labels
   )
 }
 ```
@@ -525,7 +465,7 @@ this a useful case for comparing the four `off_support` strategies:
 - `split`, which breaks the x-axis into a small observed-statistic panel and a
   larger null-distribution panel.
 
-The next three figures hold the data and permutation draws fixed and vary only
+The next three figures hold the data and MC replications fixed and vary only
 the `off_support` argument.
 
 #### General missingness with `off_support = "arrow"`
@@ -614,7 +554,7 @@ bind_rows(
     observed_statistic = discernment_general_plot$stat_obs,
     p_value = discernment_general_plot$p_value,
     design = discernment_general_plot$design,
-    nperm = discernment_general_plot$nperm
+    `MC replications` = discernment_general_plot$mc_replications
   ),
   tibble(
     analysis = discernment_complete_case_plot$mode_label,
@@ -623,30 +563,45 @@ bind_rows(
     observed_statistic = discernment_complete_case_plot$stat_obs,
     p_value = discernment_complete_case_plot$p_value,
     design = discernment_complete_case_plot$design,
-    nperm = discernment_complete_case_plot$nperm
+    `MC replications` = discernment_complete_case_plot$mc_replications
   )
 ) %>%
   kable(digits = 3)
 ```
 
+```{r}
+#| include: false
+# Values quoted in the text below, taken from the plot objects above.
+cc_plot <- discernment_complete_case_plot
+gen_plot <- discernment_general_plot
+cc_null_range <- range(cc_plot$stat_null)
+gen_null_range <- range(gen_plot$stat_null)
+```
+
 - Under `analysis = "complete-case"`, the test drops missing outcomes and works
-  only with the `4543` endline respondents. In this observed-only sample, the
+  only with the `r fmt_n(cc_plot$counts$n_obs)` respondents in this binary
+  sample who completed the endline. In this observed-only sample, the
   discernment outcome is higher in treatment than in control, and the observed
-  Wilcoxon rank-sum statistic is about `1682.755`. The corresponding blocked
-  complete-case null distribution is much farther left, roughly from `1657.510`
-  to `1668.716`, so none of the `10000` null draws is at least as large as the
-  observed statistic. That is why the empirical p-value is `0.000`.
-- Under `analysis = "general"`, the test keeps all `8947` randomized units and
+  Wilcoxon rank-sum statistic is about `r fmt3(cc_plot$stat_obs)`. The
+  corresponding blocked complete-case null distribution is much farther left,
+  roughly from `r fmt3(cc_null_range[1])` to `r fmt3(cc_null_range[2])`, so
+  none of the `r fmt_n(cc_plot$mc_replications)` MC replications is at least as
+  large as the observed statistic. That is why the empirical p-value is
+  `r fmt3(cc_plot$p_value)`.
+- Under `analysis = "general"`, the test keeps all
+  `r fmt_n(gen_plot$counts$n_total)` randomized units in this binary sample and
   applies the package's most conservative completion rule under general
-  missingness. Here there are `4404` missing outcomes in total, including
-  `3260` missing treated outcomes and `1144` missing control outcomes. Under
-  the sharp null with `c = 0`, the missing treated outcomes are placed at
-  `-Inf`, while the missing control outcomes are placed at `Inf`. This pushes
-  the observed rank-sum statistic sharply downward to about `2665.175`, whereas
-  the blocked general-missingness null distribution is much farther right,
-  roughly from `3289.456` to `3303.063`. Every one of the `10000` null draws is
-  at least as large as the observed statistic, so the empirical p-value is
-  `1.000`.
+  missingness. Here there are `r fmt_n(gen_plot$counts$n_miss)` missing outcomes
+  in total, including `r fmt_n(gen_plot$counts$n_miss_treat)` missing treated
+  outcomes and `r fmt_n(gen_plot$counts$n_miss_control)` missing control
+  outcomes. Under the sharp null with `c = 0`, the missing treated outcomes are
+  placed at `-Inf`, while the missing control outcomes are placed at `Inf`. This
+  pushes the observed rank-sum statistic sharply downward to about
+  `r fmt3(gen_plot$stat_obs)`, whereas the blocked general-missingness null
+  distribution is much farther right, roughly from `r fmt3(gen_null_range[1])`
+  to `r fmt3(gen_null_range[2])`. Every one of the
+  `r fmt_n(gen_plot$mc_replications)` MC replications is at least as large as
+  the observed statistic, so the empirical p-value is `r fmt3(gen_plot$p_value)`.
 
 ## Sensitivity Check: `missing = "mn"`
 
@@ -740,26 +695,29 @@ discernment_counts_tbl <- tibble(
     "Control attrition rate"
   ),
   value = c(
-    discernment_counts$n_total,
-    discernment_counts$n_obs,
-    discernment_counts$n_miss,
-    discernment_counts$n_obs_treat,
-    discernment_counts$n_obs_control,
-    discernment_counts$n_miss_treat,
-    discernment_counts$n_miss_control,
-    discernment_counts$attrition_rate_total,
-    discernment_counts$attrition_rate_treat,
-    discernment_counts$attrition_rate_control
+    fmt_n(discernment_counts$n_total),
+    fmt_n(discernment_counts$n_obs),
+    fmt_n(discernment_counts$n_miss),
+    fmt_n(discernment_counts$n_obs_treat),
+    fmt_n(discernment_counts$n_obs_control),
+    fmt_n(discernment_counts$n_miss_treat),
+    fmt_n(discernment_counts$n_miss_control),
+    fmt_pct(discernment_counts$attrition_rate_total),
+    fmt_pct(discernment_counts$attrition_rate_treat),
+    fmt_pct(discernment_counts$attrition_rate_control)
   )
 )
 
-kable(discernment_counts_tbl, digits = 3)
+kable(discernment_counts_tbl, align = c("l", "r"))
 ```
 
 ### Compute block diagnostics with `.ri_block_diagnostics()`
 
 Because this is a blocked experiment, we also summarize attrition patterns
-within blocks.
+within blocks. For each block we take the treated-minus-control attrition rate,
+then average these differences with weights proportional to block size
+(block size / total units), so the summary reflects the whole sample rather
+than the average block. Blocks that lack either arm are left out.
 
 ```{r}
 discernment_block_diag <- .ri_block_diagnostics(
@@ -771,17 +729,19 @@ discernment_block_diag <- .ri_block_diagnostics(
 discernment_block_tbl <- tibble(
   statistic = c(
     "Number of blocks",
-    "Mean within-block attrition diff",
+    "Blocks with both arms",
+    "Weighted mean within-block attrition diff (block-size weights)",
     "Median within-block attrition diff"
   ),
   value = c(
-    discernment_block_diag$n_blocks,
-    discernment_block_diag$mean_within_block_attrition_diff,
-    discernment_block_diag$median_within_block_attrition_diff
+    fmt_n(discernment_block_diag$n_blocks),
+    fmt_n(discernment_block_diag$n_blocks_used),
+    fmt_pp(discernment_block_diag$weighted_mean_within_block_attrition_diff),
+    fmt_pp(discernment_block_diag$median_within_block_attrition_diff)
   )
 )
 
-kable(discernment_block_tbl, digits = 3)
+kable(discernment_block_tbl, align = c("l", "r"))
 ```
 
 ### Generate blocked permutations with `.ri_default_assignments()`
@@ -913,7 +873,7 @@ summary(discernment_stat_null)
 ### Compute the randomization p-value manually
 
 For the one-sided sharp-null test implemented here, the p-value is the fraction
-of null draws that are at least as large as the observed statistic.
+of MC replications whose statistic is at least as large as the observed statistic.
 
 ```{r}
 discernment_p_manual <- mean(discernment_stat_null >= discernment_stat_obs)
@@ -961,7 +921,8 @@ discernment_from_wrapper <- ri_sharp_attrition(
   Z.perm = discernment_Z_perm,
   nperm = nperm,
   include_ci = FALSE,
-  include_twostep = FALSE
+  include_twostep = FALSE,
+  outcome_name = "end_icw_discernment"
 )
 
 discernment_comparison <- tibble(
@@ -990,7 +951,7 @@ readable, we use one compact helper that runs the same sequence of functions and
 stores the intermediate results.
 
 ```{r}
-run_manual_general_rs <- function(Y, Z, block, outcome_name, nperm = 10000) {
+run_manual_general_rs <- function(Y, Z, block, outcome_name, nperm = 10^4) {
   counts <- .ri_missing_counts(Z = Z, Y = Y)
   block_diag <- .ri_block_diagnostics(Z = Z, Y = Y, block = block)
   Z.perm <- .ri_default_assignments(
@@ -1045,7 +1006,8 @@ run_manual_general_rs <- function(Y, Z, block, outcome_name, nperm = 10000) {
     Z.perm = Z.perm,
     nperm = nperm,
     include_ci = FALSE,
-    include_twostep = FALSE
+    include_twostep = FALSE,
+    outcome_name = outcome_name
   )
 
   observed_means <- tibble(
@@ -1146,22 +1108,33 @@ kable(paper_comparison, digits = 3)
 
 ### Interpretation of the comparison
 
+```{r}
+#| include: false
+# Rows of paper_comparison quoted in the text below.
+pc_tk <- paper_comparison[paper_comparison$outcome == "end_icw_treat_knowledge", ]
+pc_disc <- paper_comparison[paper_comparison$outcome == "end_icw_discernment", ]
+```
+
 For treatment knowledge:
 
-- the paper's pooled treatment coefficient is `0.411` in column `(1)` and
-  `0.414` in column `(2)` of `Table F2`;
+- the paper's pooled treatment coefficient is `r fmt3(pc_tk$paper_coef_col1)`
+  in column `(1)` and `r fmt3(pc_tk$paper_coef_col2)` in column `(2)` of
+  `Table F2`;
 - our observed complete-case treated-control difference in the simplified
-  `Control` versus `Pooled treatment` sample is about `0.392`; and
+  `Control` versus `Pooled treatment` sample is about
+  `r fmt3(pc_tk$app_observed_diff)`; and
 - our `ri_sharp_attrition()` result under `missing = "general"` gives a sharp-null
-  p-value of `1.000`.
+  p-value of `r fmt3(pc_tk$app_general_p)`.
 
 For discernment:
 
-- the paper's pooled treatment coefficient is `0.058` in column `(1)` and
-  `0.063` in column `(2)` of `Table F4`;
-- our observed complete-case treated-control difference is about `0.059`; and
+- the paper's pooled treatment coefficient is `r fmt3(pc_disc$paper_coef_col1)`
+  in column `(1)` and `r fmt3(pc_disc$paper_coef_col2)` in column `(2)` of
+  `Table F4`;
+- our observed complete-case treated-control difference is about
+  `r fmt3(pc_disc$app_observed_diff)`; and
 - our `ri_sharp_attrition()` result under `missing = "general"` again gives a sharp-null
-  p-value of `1.000`.
+  p-value of `r fmt3(pc_disc$app_general_p)`.
 
 The coefficient comparison and the inference
 comparison are answering different questions.
@@ -1185,38 +1158,45 @@ conventional regression-based diagnostics for the same binary `Control` versus
 ### Regressions by experimental group
 
 These tables mirror the spirit of Gerber and Green's Table 7.5 by estimating
-separate missingness regressions within the control and treatment groups. Here
-`M = 1` means the endline outcome is missing.
+separate missingness regressions within the control and treatment groups. As in
+Li, Sheng & Yu (2025), `M = 1` means the endline outcome is observed and
+`M = 0` means it is missing, so a positive coefficient means a higher
+probability of being observed (less attrition).
+
+The `Difference (T - C)` column reports, for each covariate, the
+treatment-group coefficient minus the control-group coefficient and its
+p-value. The last two rows test the groups jointly: the slopes test asks
+whether the covariates predict `M` in the same way in both groups, and the Chow
+test asks whether the two groups share the whole regression, constant included.
+
+```{r}
+discernment_ar <- missingness_regressions("end_icw_discernment")
+treat_knowledge_ar <- missingness_regressions("end_icw_treat_knowledge")
+```
 
 #### Discernment
 
 ```{r}
-discernment_group_table <- run_group_missingness_table(
-  dat = app_data,
-  y_var = "end_icw_discernment",
-  covariates = diag_covars
-)
-
 kable(
-  discernment_group_table,
-  col.names = c("Covariate", "Control group", "Treatment group"),
-  caption = "Discernment missingness regressions by experimental group. Entries are OLS coefficients with HC1 standard errors in parentheses."
+  attrition_table(discernment_ar, type = "group"),
+  align = c("l", "r", "r", "r", "r"),
+  caption = md_caption(
+    "Discernment missingness regressions by experimental group.",
+    attrition_table_note(discernment_ar, type = "group")
+  )
 )
 ```
 
 #### Treatment knowledge
 
 ```{r}
-treat_knowledge_group_table <- run_group_missingness_table(
-  dat = app_data,
-  y_var = "end_icw_treat_knowledge",
-  covariates = diag_covars
-)
-
 kable(
-  treat_knowledge_group_table,
-  col.names = c("Covariate", "Control group", "Treatment group"),
-  caption = "Treatment-knowledge missingness regressions by experimental group. Entries are OLS coefficients with HC1 standard errors in parentheses."
+  attrition_table(treat_knowledge_ar, type = "group"),
+  align = c("l", "r", "r", "r", "r"),
+  caption = md_caption(
+    "Treatment-knowledge missingness regressions by experimental group.",
+    attrition_table_note(treat_knowledge_ar, type = "group")
+  )
 )
 ```
 
@@ -1224,28 +1204,19 @@ kable(
 
 These pooled regressions ask two related questions:
 
-- do baseline covariates jointly predict missingness at all; and
-- do those covariate-missingness relationships differ by treatment status?
+- do baseline covariates jointly predict missingness at all (reg. (a)); and
+- do those covariate-missingness relationships differ by treatment status
+  (the `Treatment x X` terms in reg. (b))?
 
 #### Discernment
 
 ```{r}
-discernment_reg_pair <- run_missingness_regression_pair(
-  dat = app_data,
-  y_var = "end_icw_discernment",
-  covariates = diag_covars
-)
-
 kable(
-  discernment_reg_pair$table,
-  col.names = c("Covariate", "Reg. (a): M on X", "Reg. (b): M on X, Z, and X x Z"),
-  caption = paste0(
-    "Discernment missingness regressions. Entries are OLS coefficients with HC1 standard errors in parentheses. ",
-    "Joint p-value for H0: all X coefficients in reg. (a) = 0 is ",
-    sprintf('%.3f', discernment_reg_pair$p_all_x),
-    ". Joint p-value for H0: all X x Z coefficients in reg. (b) = 0 is ",
-    sprintf('%.3f', discernment_reg_pair$p_all_xz),
-    "."
+  attrition_table(discernment_ar, type = "pooled"),
+  align = c("l", "r", "r"),
+  caption = md_caption(
+    "Discernment missingness regressions.",
+    attrition_table_note(discernment_ar, type = "pooled")
   )
 )
 ```
@@ -1253,22 +1224,107 @@ kable(
 #### Treatment knowledge
 
 ```{r}
-treat_knowledge_reg_pair <- run_missingness_regression_pair(
-  dat = app_data,
-  y_var = "end_icw_treat_knowledge",
-  covariates = diag_covars
-)
-
 kable(
-  treat_knowledge_reg_pair$table,
-  col.names = c("Covariate", "Reg. (a): M on X", "Reg. (b): M on X, Z, and X x Z"),
-  caption = paste0(
-    "Treatment-knowledge missingness regressions. Entries are OLS coefficients with HC1 standard errors in parentheses. ",
-    "Joint p-value for H0: all X coefficients in reg. (a) = 0 is ",
-    sprintf('%.3f', treat_knowledge_reg_pair$p_all_x),
-    ". Joint p-value for H0: all X x Z coefficients in reg. (b) = 0 is ",
-    sprintf('%.3f', treat_knowledge_reg_pair$p_all_xz),
-    "."
+  attrition_table(treat_knowledge_ar, type = "pooled"),
+  align = c("l", "r", "r"),
+  caption = md_caption(
+    "Treatment-knowledge missingness regressions.",
+    attrition_table_note(treat_knowledge_ar, type = "pooled")
   )
 )
 ```
+
+### Are covariates linked to differential attrition also prognostic of Y?
+
+Differential attrition on a covariate can bias the comparison of observed
+outcomes only if that covariate also predicts the outcome. We check this in
+three steps:
+
+1. regress `Y` on `X` among control-group units with observed outcomes, which
+   describes how the covariates predict `Y*_i(0)` (prognostic);
+2. put each covariate's differential-attrition coefficient (`Z x X` in the
+   missingness regression) next to its prognostic coefficient; and
+3. predict `Y*_i(0)` for every unit from step 1 and compare treated and
+   control units, first among all randomized units and then among units with
+   observed outcomes.
+
+```{r}
+prognostic_for <- function(y_var) {
+  prognostic_check(
+    Y = diag_data[[y_var]],
+    Z = diag_data$Z,
+    X = diag_data[diag_covars],
+    labels = diag_cov_labels
+  )
+}
+
+discernment_pc <- prognostic_for("end_icw_discernment")
+treat_knowledge_pc <- prognostic_for("end_icw_treat_knowledge")
+```
+
+#### Discernment
+
+```{r}
+kable(
+  prognostic_table(discernment_pc, type = "side_by_side"),
+  align = c("l", "r", "r", "r", "r"),
+  caption = md_caption(
+    "Discernment: differential attrition and prognostic power by covariate.",
+    prognostic_table_note(discernment_pc, type = "side_by_side")
+  )
+)
+
+kable(
+  prognostic_table(discernment_pc, type = "score"),
+  align = c("l", "r", "r", "r"),
+  caption = md_caption(
+    "Discernment: treated-minus-control differences in predicted Y*(0) and in observed Y.",
+    prognostic_table_note(discernment_pc, type = "score")
+  )
+)
+```
+
+#### Treatment knowledge
+
+```{r}
+kable(
+  prognostic_table(treat_knowledge_pc, type = "side_by_side"),
+  align = c("l", "r", "r", "r", "r"),
+  caption = md_caption(
+    "Treatment knowledge: differential attrition and prognostic power by covariate.",
+    prognostic_table_note(treat_knowledge_pc, type = "side_by_side")
+  )
+)
+
+kable(
+  prognostic_table(treat_knowledge_pc, type = "score"),
+  align = c("l", "r", "r", "r"),
+  caption = md_caption(
+    "Treatment knowledge: treated-minus-control differences in predicted Y*(0) and in observed Y.",
+    prognostic_table_note(treat_knowledge_pc, type = "score")
+  )
+)
+```
+
+For discernment, the slopes test for differential attrition on the covariates
+gives p = `r fmt3(discernment_pc$attrition$tests$slopes$p)`, and among
+units with observed outcomes the treated-minus-control difference in predicted
+`Y*(0)` is `r fmt3(discernment_pc$score$respondents$est)`, compared with an
+observed-outcome difference of `r fmt3(discernment_pc$score$observed_y$est)`.
+The same comparison for treatment knowledge is
+`r fmt3(treat_knowledge_pc$score$respondents$est)` versus
+`r fmt3(treat_knowledge_pc$score$observed_y$est)`. These checks cover observed
+covariates only; unobserved factors can still drive differential attrition.
+
+#### The same tables in LaTeX and Markdown
+
+`attrition_table()` also returns LaTeX or Markdown source, for pasting into a
+paper or handing to another tool. For example, the discernment group table in
+LaTeX:
+
+```{r}
+cat(attrition_table(discernment_ar, type = "group", format = "latex"))
+```
+
+Significance stars are off by default; `stars = TRUE` adds them (with a legend
+in the note).

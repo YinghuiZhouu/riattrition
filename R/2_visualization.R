@@ -43,7 +43,9 @@
 #'   supported.
 #' @param cluster_missing A string that specifies when the cluster-level outcome
 #'   is missing.
-#' @param nperm A positive integer that specifies the number of permutations.
+#' @param nperm A positive integer that specifies the number of Monte Carlo
+#'   (MC) replications, i.e. random re-assignments drawn to approximate the
+#'   randomization distribution (default 10^4).
 #' @param style Plot style. `"histogram"` is the default because it directly
 #'   represents the empirical permutation distribution. `"density"` is available
 #'   as a smoother alternative.
@@ -121,6 +123,7 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
 
   viz$off_support_mode <- plot_meta$off_support_mode
   viz$obs_position <- plot_meta$obs_position
+  viz$subtitle <- plot_meta$subtitle
 
   invisible(viz)
 }
@@ -192,7 +195,7 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
       design = analysis_data$design,
       inference_unit = analysis_data$inference_unit,
       counts = counts,
-      nperm = nperm
+      mc_replications = length(stat.null)
     ),
     class = "riattrition_plot"
   )
@@ -237,7 +240,7 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
   )
   subtitle_line_2 <- paste0(
     x$design,
-    " | nperm = ", x$nperm
+    " | MC replications = ", .ri_format_count(x$mc_replications)
   )
 
   tail_note <- if (identical(off_support_mode, "split")) {
@@ -247,9 +250,9 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
   } else if (identical(obs_position, "left")) {
     "Observed statistic is left of null support; the entire histogram is in the right tail."
   } else if (identical(obs_position, "right")) {
-    "Observed statistic is right of null support; no null draws fall in the right tail."
+    "Observed statistic is right of null support; no MC replications fall in the right tail."
   } else {
-    "Right-tail region is shaded; the p-value is the share of null draws at least as large as the observed statistic."
+    "Right-tail region is shaded; the p-value is the share of MC replications at least as large as the observed statistic."
   }
 
   plot_data <- .ri_build_plot_data(
@@ -307,7 +310,8 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
 
   invisible(list(
     off_support_mode = off_support_mode,
-    obs_position = obs_position
+    obs_position = obs_position,
+    subtitle = c(subtitle_line_1, subtitle_line_2)
   ))
 }
 

@@ -66,7 +66,7 @@ supported.}
 \item{cluster_missing}{A string that specifies when the cluster-level outcome is
 missing.}
 
-\item{nperm}{A positive integer that specifies the number of permutations.}
+\item{nperm}{A positive integer that specifies the number of Monte Carlo (MC) replications, i.e. random re-assignments drawn to approximate the randomization distribution (default 10^4).}
 
 \item{style}{Plot style. \code{"histogram"} is the default because it directly
 represents the empirical permutation distribution. \code{"density"} is
