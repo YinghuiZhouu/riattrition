@@ -13,841 +13,723 @@ execute:
 
 ## Purpose
 
-This note consolidates the Chen and Yang (2019) application into one main document.
-The goals are:
+This note applies the `riattrition` package to:
 
-- summarize the experiment and the original Table 3 analysis;
-- reproduce the paper's benchmark reduced-form estimates;
-- re-run the main contrasts using the updated `riattrition` package;
-- visualize how attrition changes the randomization distribution; and
-- bring the main attrition diagnostics into a single workflow.
+- Chen, Yuyu, and David Y. Yang. 2019. "The Impact of Media Censorship: 1984 or Brave New World?" *American Economic Review* 109(6): 2294-2332.
 
 ## File Locations
 
 ```{r}
-data_path <- "/Users/yinghuizhou/Library/CloudStorage/Dropbox/Projects/intro_rand_inf_missing/0_paper and data survey/1_field experiments/datasets_potential/3 Chen and Yang -- Media censorship/panelsurvey_clean.dta"
-old_notes_dir <- "/Users/yinghuizhou/Library/CloudStorage/Dropbox/Projects/intro_rand_inf_missing/5_application_code_and_notes"
-lee_AE_path <- file.path(old_notes_dir, "lee_bounds_AE_vs_control.dta")
-lee_A_path <- file.path(old_notes_dir, "lee_bounds_A_vs_control.dta")
-lee_CE_path <- file.path(old_notes_dir, "lee_bounds_CE_vs_control.dta")
+# Package root relative to this file (analysis/..), so each copy of this
+# document sources the R code that sits next to it.
+package_dir <- normalizePath("..")
 
-list(
-  data_path = data_path,
-  old_notes_dir = old_notes_dir,
-  lee_AE_path = lee_AE_path,
-  lee_A_path = lee_A_path,
-  lee_CE_path = lee_CE_path
-)
+# Paper and the authors' replication package (AER, openICPSR 116201-V1).
+paper_pdf <- file.path(package_dir, "data-raw", "chen_and_yang_2019", "chen_and_yang_2019aer.pdf")
+replication_dir <- file.path(package_dir, "data-raw", "chen_and_yang_2019", "raw_data")
+raw_data_path <- file.path(replication_dir, "panelsurvey_raw.dta")
+authors_do_file <- file.path(replication_dir, "master_dofile_panelsurvey.do")
+
+# Full constructed survey data: panelsurvey_raw.dta after the variable
+# construction part of the authors' do-file (everything before "ANALYSES").
+full_data_path <- "/Users/yinghuizhou/Library/CloudStorage/Dropbox/Projects/intro_rand_inf_missing/0_paper and data survey/1_field experiments/datasets_potential/3 Chen and Yang -- Media censorship/panelsurvey_clean.dta"
+
+# Data set shipped with the package (AE and control groups only).
+package_data_path <- file.path(package_dir, "data", "chen_and_yang_2019.rda")
+
+file.exists(c(paper_pdf, raw_data_path, authors_do_file, full_data_path, package_data_path))
 ```
 
 ## Summary of the Experiment
 
 ### Substantive question
 
-Chen and Yang (2019) study whether access to uncensored information changes what
-Chinese university students know, believe, and intend to do politically. The
-paper focuses on the effects of media censorship by experimentally varying
-access to foreign news websites that are blocked by the Great Firewall.
+China blocks many foreign websites, including most Western news outlets, behind
+the "Great Firewall". Does this censorship work mainly because information is
+unavailable (as in *1984*), or because people do not seek out uncensored
+information even when they could (as in *Brave New World*)? And once people do
+read uncensored news, do their knowledge, beliefs, and political attitudes change?
+Chen and Yang answer these questions by randomly giving university students free,
+uncensored internet access and, for some of them, temporary encouragement to read
+blocked foreign news.
 
-### Treatment arms
+### Setting and sample
 
-The experiment includes four relevant arms:
+- In November 2015, the authors recruited undergraduate students at two universities
+  in Beijing: a top-ranked university considered the most liberal in China, and a
+  slightly lower-ranked one. The recruitment message described a study of students'
+  beliefs and attitudes and never mentioned internet access.
+- 1,807 students completed the 90-minute baseline survey: 1,490 from the elite
+  university and 317 from the lower-ranked university.
+- 331 of them already paid for and used a tool to get around the censorship
+  ("existing users"). They were **not** randomized. The authors kept surveying them
+  as a benchmark group.
+- The remaining 1,476 students are the randomized sample.
 
-- `Control`: no new access and no newsletter encouragement.
-- `A` (Access only): students receive free VPN access but no direct encouragement to consume blocked foreign news.
-- `CE` (Encouragement only): students receive newsletters encouraging foreign news consumption, but no VPN access.
-- `AE` (Access plus encouragement): students receive both VPN access and newsletter encouragement.
+### The interventions
 
-The contrast structure in Table 3 therefore centers on three two-arm
-comparisons:
+**Access (A).** A free 18-month subscription to a premium censorship circumvention
+tool, a service worth about US$25 per month. It was distributed as a
+lottery prize after the baseline survey. Once set up, it lets the student open
+websites blocked by the Great Firewall on a computer or phone. The authors observe
+the foreign-website browsing of treated students who activated the tool.
 
-- `AE` versus `Control`
-- `A` versus `Control`
-- `CE` versus `Control`
+**Encouragement (E).** Newsletters sent every two weeks by email and WeChat
+from December 2015 to March 2016, in two phases of about two months each:
+
+1. *Information:* four newsletters introducing blocked foreign news websites (for
+   example the Chinese edition of the *New York Times*) and noting that sensitive
+   news is often reported differently abroad.
+2. *Quizzes:* four rounds of news quizzes whose answers could be found within a
+   couple of minutes on the front page of the *New York Times* Chinese edition,
+   with US$2.5 for each correct answer.
+
+Students in the encouragement-only group received the same newsletters but had no
+tool to open the blocked websites. This group separates the effect of the
+newsletters themselves (for example experimenter demand) from the effect of
+actually reading foreign news.
+
+### What exactly was randomized?
+
+Among the 1,476 non-users, the authors randomly assigned two-thirds to the access
+treatment and, independently, two-thirds to the encouragement treatment (a 2 x 2
+cross-randomization). The randomization was stratified by university, gender, and
+cohort (p. 2308). This creates four randomized groups:
+
+| Group | Access tool | Newsletters | N |
+|---|---|---|---|
+| Control (C) | No | No | 185 |
+| Encouragement only (CE) | No | Yes | 328 |
+| Access only (A) | Yes | No | 313 |
+| Access + encouragement (AE) | Yes | Yes | 650 |
+| Existing users (not randomized) | already had their own | - | 331 |
+
+All results in the paper are intent-to-treat comparisons of each randomized group
+with the control group. About half of the students who received the tool never used
+it.
+
+### Timeline
+
+- November 2015: recruitment and baseline survey.
+- December 2015: access tool and first newsletter sent out.
+- March 2016: encouragement ends.
+- May 2016: midline survey, about 6 months after treatment (1,617 students).
+- April 2017: endline survey, about 18 months after treatment (1,372 students).
 
 ### Outcomes
 
-Table 3 reports reduced-form treatment effects for five standardized wave-3
-outcome families:
+The browsing logs exist only for treated students who activated the tool, so they
+cannot be compared with the control group. The survey outcomes are measured for
+everyone who answered a survey. The paper groups them into five pre-registered
+categories:
 
-1. media-related behaviors
-2. knowledge
-3. economic beliefs
-4. political attitudes
-5. behaviors and planned behaviors
+- **A. Media-related behaviors, beliefs, and attitudes:** for example how much
+  students value uncensored internet (including an incentivized willingness to pay),
+  trust in domestic and foreign media, and beliefs about censorship.
+- **B. Knowledge:** for example current news events not covered in the newsletters
+  and awareness of protests.
+- **C. Economic beliefs:** incentivized guesses about China's GDP growth and stock
+  market.
+- **D. Political attitudes:** for example trust in institutions and evaluations of
+  the government's performance.
+- **E. Behaviors and planned behaviors:** for example discussing politics with
+  friends, political participation, and plans after graduation.
 
-### Attrition in the paper
+Each category is summarized by a z-score index: each item is standardized, and the
+items are combined with weights from the inverse of their covariance matrix
+(Anderson 2008). The indices are continuous, and the paper's main results (Table 3) use the endline versions.
 
-The paper's main Table 3 analysis is a wave-3 respondent analysis. In other
-words, the published regression results condition on being observed at endline.
-The paper argues that attrition is unlikely to create serious bias because:
+### Attrition
 
-- attrition does not differ significantly across treatment arms;
-- baseline and endline samples look similar on observables; and
-- baseline outcomes do not strongly predict later attrition.
+Of the 1,807 baseline participants, 1,372 completed the endline survey, so
+attrition is 24.1%. The authors attribute it to the fact that they could only
+contact students online. They argue that attrition is unlikely to bias their
+results because (i) the attrition rate does not differ by treatment status
+(p = 0.782), (ii) the baseline and endline samples look alike on baseline
+characteristics (Table 1), and (iii) baseline outcomes do not predict attrition.
+They also report Lee (2009) bounds for the access + encouragement effects.
 
-These are exactly the kinds of claims we want to revisit using the updated
-package and a more explicit missingness framework.
+For the five survey indices, attrition is the only reason for missing values: in
+the randomized sample, an index is missing exactly when the student did not
+complete the endline survey (checked below).
 
-## Load the Updated Package Code
+### Main findings in the paper
 
-We source the local package code directly from the current repo.
+- **Access alone changes little.** Nearly half of the students given only the tool
+  never use it, and almost none of those who use it browse blocked foreign news.
+- **Access plus temporary encouragement has large and lasting effects.** Students in
+  the AE group keep reading foreign news after the encouragement ends. At endline
+  they score higher on all five indices (Table 3, Panel A): 1.268 standard deviations
+  on the media index, 0.412 on knowledge, 0.573 on economic beliefs, 0.853 on
+  political attitudes, and 0.328 on behaviors.
+- **Encouragement alone and access alone** have small effects. The largest is the
+  effect of access alone on the media index (0.215, SE 0.080).
 
-```{r, include=FALSE}
-source("../R/0_function_sharp_null.R")
-source("../R/0_function_sharp_null_twostep.R")
-source("../R/1_result_output.R")
-source("../R/2_visualization.R")
-```
+## Randomization Design Used in This Note
 
-## Load Data and Libraries
+The paper stratified the randomization by university, gender, and cohort. **The
+randomization tests in this note do not use the strata.** Each comparison of a
+treated group with the control group is analyzed as a completely randomized
+experiment: the Monte Carlo permutations reshuffle treatment among all students in
+the two groups, ignoring the strata.
 
-```{r, include=FALSE}
+We use complete randomization for now because the package's option for blocked
+designs (`block =`) is being revised. Results under the stratified design will be
+added after the revision. Until then, the reference distribution of the tests does
+not match the way treatment was actually assigned.
+
+Two further points about the design:
+
+- Each comparison keeps only two of the four randomized groups (for example AE and
+  control). Within these two groups, which students ended up in AE and which in
+  control is still determined by the random assignment.
+- Existing users were not randomized, so they are left out of every analysis below.
+
+The strata can be rebuilt from the data, although a few students lack the gender or
+cohort variable:
+
+```{r}
 library(dplyr)
 library(haven)
 library(fixest)
 library(knitr)
-library(tibble)
-library(purrr)
 
-raw_data <- read_dta(data_path)
-dim(raw_data)
+full_data <- zap_labels(read_dta(full_data_path))
+randomized <- full_data[full_data$treatment_user == 0, ]
+
+strata_vars <- randomized[c("university", "gender", "year_started_college")]
+has_strata_info <- complete.cases(strata_vars)
+strata <- paste(strata_vars$university, strata_vars$gender, strata_vars$year_started_college)
+
+c(
+  randomized_students = nrow(randomized),
+  missing_gender = sum(is.na(strata_vars$gender)),
+  missing_cohort = sum(is.na(strata_vars$year_started_college)),
+  strata_among_complete = length(unique(strata[has_strata_info]))
+)
 ```
 
-## Harmonize Variables
+## Data Sources
+
+The authors' replication package contains the raw survey data
+(`panelsurvey_raw.dta`) and a do-file (`master_dofile_panelsurvey.do`). The first
+part of the do-file builds the analysis variables, including the five outcome
+indices and the baseline covariates. The second part ("ANALYSES") runs the
+regressions for each table. Different tables in the paper use different samples
+of the same data set:
+
+| Analysis in this note | Paper counterpart | Sample |
+|---|---|---|
+| Attrition summary | Section II.D, Table 1 | all 1,807 baseline participants |
+| Reproduce Table 3, Panel A | Table 3, Panel A | randomized students who completed the endline survey (all four groups in one regression) |
+| Randomization tests | Table 3, Panel A | randomized students in the treated group and in the control group, **including** those who did not complete the endline survey |
+| Attrition diagnostics | Table 1, Appendix Table A.5 | same as the randomization tests |
+
+The paper's own Table 3 regression drops students who did not complete the
+endline survey. The randomization tests keep them, because the method needs every
+randomized student.
+
+All analyses below use one data set: the full constructed data
+(`panelsurvey_clean.dta`, 1,807 students). This is `panelsurvey_raw.dta` after the
+variable-construction part of the authors' do-file. The package data set
+`chen_and_yang_2019` was built the same way but keeps only the AE and control
+groups, so it cannot be used for the A and CE comparisons. The checks below
+confirm that the sources agree.
 
 ```{r}
-chen_yang <- raw_data %>%
-  rename(
-    Z_treatment_vpnonly = treatment_vpnonly,
-    Z_treatment_nlonly = treatment_nlonly,
-    Z_treatment_vpnnl = treatment_vpnnl,
-    Z_treatment_control = treatment_control,
-    D_prior_vpn_user = treatment_user,
-    Y_az_overall_a_w3 = az_overall_a_w3,
-    Y_az_overall_b_w3 = az_overall_b_w3,
-    Y_az_overall_c_w3 = az_overall_c_w3,
-    Y_az_overall_d_w3 = az_overall_d_w3,
-    Y_az_overall_e_w3 = az_overall_e_w3
-  )
-
-outcomes <- c(
-  "Y_az_overall_a_w3",
-  "Y_az_overall_b_w3",
-  "Y_az_overall_c_w3",
-  "Y_az_overall_d_w3",
-  "Y_az_overall_e_w3"
+# Check 1: the constructed data contains the same 1,807 students as the raw data.
+raw_data <- read_dta(raw_data_path)
+c(
+  raw_rows = nrow(raw_data),
+  constructed_rows = nrow(full_data),
+  same_students = setequal(raw_data$responseID_wave1, full_data$responseID_wave1)
 )
+
+# Check 2: for the AE and control groups, the package data has the same
+# outcomes and the same endline-completion indicator as the constructed data.
+load(package_data_path)  # creates chen_and_yang_2019
+outcomes <- c("az_overall_a_w3", "az_overall_b_w3", "az_overall_c_w3",
+              "az_overall_d_w3", "az_overall_e_w3")
+check_vars <- c("responseID_wave1", "panelmerged_wave3", outcomes)
+
+ae_control <- randomized[randomized$treatment_vpnnl == 1 | randomized$treatment_control == 1, ]
+both <- merge(ae_control[check_vars], chen_and_yang_2019[check_vars],
+              by = "responseID_wave1", suffixes = c("_full", "_package"))
+c(
+  ae_control_rows = nrow(ae_control),
+  package_rows = nrow(chen_and_yang_2019),
+  matched_students = nrow(both),
+  same_values = all(sapply(check_vars[-1], function(v) {
+    isTRUE(all.equal(both[[paste0(v, "_full")]], both[[paste0(v, "_package")]],
+                     check.attributes = FALSE))
+  }))
+)
+
+# Check 3: an index is missing exactly when the student did not complete the
+# endline survey (panelmerged_wave3 = 1 means completed).
+sapply(outcomes, function(y) {
+  identical(is.na(randomized[[y]]), randomized$panelmerged_wave3 != 1)
+})
+```
+
+The variables used below are:
+
+- `treatment_control`, `treatment_nlonly` (CE), `treatment_vpnonly` (A),
+  `treatment_vpnnl` (AE): indicators for the four randomized groups;
+- `treatment_user`: 1 for existing users (not randomized);
+- `panelmerged_wave3`: 1 if the student completed the endline survey;
+- `az_overall_a_w3` to `az_overall_e_w3`: the five endline outcome indices;
+- `h_*`: baseline covariates built by the authors' do-file (used in the
+  diagnostics).
+
+## Load the Package Code
+
+```{r}
+source(file.path(package_dir, "R", "0_function_sharp_null.R"))
+source(file.path(package_dir, "R", "0_function_sharp_null_twostep.R"))
+source(file.path(package_dir, "R", "1_result_output.R"))
+source(file.path(package_dir, "R", "2_visualization.R"))
+source(file.path(package_dir, "R", "4_missingness_tests.R"))
+source(file.path(package_dir, "R", "3_attrition_diagnostics.R"))
+source(file.path(package_dir, "analysis", "prognostic_check.R"))
+
+# Display helpers.
+fmt3 <- function(x) formatC(x, digits = 3, format = "f")
+est_se <- function(est, se) paste0(fmt3(est), " [", fmt3(se), "]")
+# Table captions go through Markdown: escape "*" so Y*_i(0) keeps its star.
+md_caption <- function(...) gsub("*", "\\*", paste(...), fixed = TRUE)
 
 outcome_labels <- c(
-  "Media",
-  "Knowledge",
-  "Economic beliefs",
-  "Political attitudes",
-  "Behaviors / plans"
+  az_overall_a_w3 = "A. Media",
+  az_overall_b_w3 = "B. Knowledge",
+  az_overall_c_w3 = "C. Economic beliefs",
+  az_overall_d_w3 = "D. Political attitudes",
+  az_overall_e_w3 = "E. Behaviors"
 )
-
-names(outcome_labels) <- outcomes
-
-covars_raw <- c(
-  "h_gender",
-  "h_birth_year",
-  "h_ethnicity_han",
-  "h_hukou_urban",
-  "h_religion_religious",
-  "h_ccp_member",
-  "h_university_elite",
-  "h_hs_track_science",
-  "h_department_ssh",
-  "h_birthplace_coastal",
-  "h_residence_coastal",
-  "h_domestic_english_atleast4",
-  "h_foreign_english_yes",
-  "h_travel_hktaiwan",
-  "h_travel_foreign_yes",
-  "h_siblings_total",
-  "h_father_edu_hsabove",
-  "h_mother_edu_hsabove",
-  "h_father_ccp",
-  "h_mother_ccp",
-  "h_work_father_govt",
-  "h_work_mother_govt",
-  "h_hh_income",
-  "h_az_preference_risk",
-  "h_az_preference_time",
-  "h_az_preference_altruism",
-  "h_az_preference_reciprocity"
-)
-
-covars <- intersect(covars_raw, names(chen_yang))
-
-length(covars)
 ```
+
+## Attrition Summary
+
+```{r}
+group_names <- c(
+  "1" = "Control (C)",
+  "2" = "Access only (A)",
+  "3" = "Encouragement only (CE)",
+  "4" = "Access + encouragement (AE)",
+  "5" = "Existing users (not randomized)"
+)
+
+completed <- full_data$panelmerged_wave3 == 1
+group <- as.character(full_data$treatment_master)
+
+attrition_summary <- data.frame(
+  Group = c(group_names, "All randomized students", "All baseline participants"),
+  `Baseline N` = c(as.vector(table(group)[names(group_names)]),
+                   sum(full_data$treatment_user == 0), nrow(full_data)),
+  `Endline N` = c(as.vector(tapply(completed, group, sum)[names(group_names)]),
+                  sum(completed[full_data$treatment_user == 0]), sum(completed)),
+  check.names = FALSE
+)
+attrition_summary$`Attrition (%)` <- round(
+  100 * (1 - attrition_summary$`Endline N` / attrition_summary$`Baseline N`), 1
+)
+
+kable(attrition_summary, align = c("l", "r", "r", "r"))
+
+# Do endline completion rates differ across the four randomized groups?
+completion_test <- anova(lm(panelmerged_wave3 == 1 ~ factor(treatment_master), data = randomized))
+completion_p <- completion_test$`Pr(>F)`[1]
+```
+
+The 24.1% in the paper is the attrition rate among all baseline participants,
+including existing users. Among the randomized students it is
+`r round(100 * (1 - sum(completed[full_data$treatment_user == 0]) / sum(full_data$treatment_user == 0)), 1)`%.
+Every treated group completed the endline survey at a higher rate than the control
+group.
+
+We could not reproduce the paper's p = 0.782 for the claim that attrition does not
+differ by treatment status. An F-test that the endline completion rate is the same
+in the four randomized groups gives p = `r fmt3(completion_p)`, which also does not
+reject.
+
+## Reproducing Table 3, Panel A
+
+As in the authors' do-file, this is one regression per outcome among randomized
+students who completed the endline survey, with indicators for CE, A, and AE
+(control is the omitted group) and heteroskedasticity-robust (HC1) standard errors.
+
+```{r}
+respondents <- randomized[randomized$panelmerged_wave3 == 1, ]
+nrow(respondents)
+
+# Paper, Table 3, Panel A: estimates and robust standard errors.
+paper_est <- rbind(
+  CE = c(0.126, 0.066, 0.065, 0.054, 0.105),
+  A  = c(0.215, 0.119, 0.136, 0.164, 0.176),
+  AE = c(1.268, 0.412, 0.573, 0.853, 0.328)
+)
+paper_se <- rbind(
+  CE = c(0.075, 0.096, 0.103, 0.095, 0.092),
+  A  = c(0.080, 0.102, 0.100, 0.096, 0.096),
+  AE = c(0.067, 0.088, 0.089, 0.086, 0.084)
+)
+colnames(paper_est) <- outcomes
+colnames(paper_se) <- outcomes
+
+arm_vars <- c(CE = "treatment_nlonly", A = "treatment_vpnonly", AE = "treatment_vpnnl")
+
+table3 <- NULL
+for (y in outcomes) {
+  model <- feols(as.formula(paste(y, "~ treatment_nlonly + treatment_vpnonly + treatment_vpnnl")),
+                 data = respondents, vcov = "HC1")
+  coefs <- coeftable(model)
+  for (arm in names(arm_vars)) {
+    table3 <- rbind(table3, data.frame(
+      Group = arm,
+      Outcome = outcome_labels[[y]],
+      `Reproduced [SE]` = est_se(coefs[arm_vars[[arm]], "Estimate"], coefs[arm_vars[[arm]], "Std. Error"]),
+      `Paper [SE]` = est_se(paper_est[arm, y], paper_se[arm, y]),
+      `OLS p-value` = fmt3(coefs[arm_vars[[arm]], "Pr(>|t|)"]),
+      check.names = FALSE
+    ))
+  }
+}
+table3 <- table3[order(match(table3$Group, c("AE", "A", "CE"))), ]
+rownames(table3) <- NULL
+
+# Used in the text further below.
+a_media_ols_p <- table3[table3$Group == "A" & table3$Outcome == "A. Media", "OLS p-value"]
+
+kable(table3, align = c("l", "l", "r", "r", "r"))
+```
+
+The estimates and standard errors match the paper's Table 3, Panel A. The OLS
+p-values are two-sided, as in the paper.
 
 ## Application Strategy
 
-The updated package is designed around binary contrasts. That fits this
-application well because Chen and Yang's Table 3 already emphasizes three binary
-treatment-versus-control comparisons.
-
-The plan is:
-
-1. reproduce the paper's benchmark reduced-form estimates using the wave-3
-   respondent sample and the paper's restriction that drops prior VPN users;
-2. move to the full contrast sample, still dropping prior VPN users, and apply
-   `ri_sharp_attrition()` outcome by outcome;
-3. compare `general` missingness to a one-sided monotone assumption selected by
-   the observed attrition imbalance; and
-4. visualize the media outcome across all three contrasts using `plot_ri_test_stat()`.
-
-The package application treats each of the three Table 3 comparisons as a
-complete-randomization binary experiment.
-
-All randomization p-values, confidence intervals, and figures below use
-10^4 Monte Carlo (MC) replications: `nperm` random re-assignments drawn under
-complete randomization.
+- **Comparisons.** AE vs. control, A vs. control, and CE vs. control, the three rows
+  of Table 3, Panel A.
+- **Outcomes.** The five endline indices. They are continuous.
+- **Sample.** All randomized students in the two groups being compared, including
+  those who did not complete the endline survey. Their outcomes are missing.
+- **Design.** Complete randomization within each comparison (see above).
+- **Missingness assumptions.** We report `general` (no assumption about who drops
+  out) and `mp` (monotone positive: M(1) ≥ M(0), where M = 1 means the endline
+  outcome is observed). Under `mp`, any student who would complete the endline
+  survey without the treatment would also complete it with the treatment. Treated
+  students received a free service worth about US$25 per month or regular
+  newsletters with paid quizzes, and every treated group completed the endline
+  survey at a higher rate than the control group. This makes `mp` plausible (see the test below), but
+  the data cannot verify it.
+- **Test.** Wilcoxon rank-sum statistic, 10^4 Monte Carlo (MC) replications. The
+  p-values are one-sided: they test the sharp null of no effect for any student
+  against a positive effect, the direction of every estimate in Table 3. The 95%
+  confidence intervals are two-sided and assume a constant additive effect.
 
 ```{r}
 nperm <- 10^4
-mc_caption <- paste0("MC replications: ", format(nperm, big.mark = ",", scientific = FALSE))
 
-# Display only: rate columns are stored as proportions and shown as percentages.
-show_rates_as_pct <- function(df) {
-  rate_cols <- c(
-    `attrition_rate (%)` = "attrition_rate",
-    `p_obs_treat (%)` = "p_obs_treat",
-    `p_obs_control (%)` = "p_obs_control"
-  )
-  df %>%
-    mutate(across(any_of(unname(rate_cols)), ~ round(100 * .x, 1))) %>%
-    rename(any_of(rate_cols))
-}
-```
-
-## Reusable Local Helpers
-
-The helpers below are not part of the package. They are only document-side
-convenience wrappers for repetitive tasks such as:
-
-- constructing the three binary contrasts;
-- looping over the five Table 3 outcomes; and
-- collecting selected fields from repeated package calls into compact tables.
-
-The actual inference in this note still comes from the package functions
-`ri_sharp_attrition()` and `plot_ri_test_stat()`.
-
-```{r}
-make_contrast <- function(dat, treat_var) {
-  dat %>%
-    filter(Z_treatment_control == 1 | .data[[treat_var]] == 1) %>%
-    mutate(Z = ifelse(.data[[treat_var]] == 1, 1L, 0L))
+make_contrast <- function(arm_var) {
+  dat <- randomized[randomized[[arm_var]] == 1 | randomized$treatment_control == 1, ]
+  dat$Z <- dat[[arm_var]]
+  dat
 }
 
-choose_monotone_assumption <- function(Y, Z) {
-  p_obs_treat <- mean(!is.na(Y[Z == 1]))
-  p_obs_control <- mean(!is.na(Y[Z == 0]))
-  if (p_obs_treat >= p_obs_control) "mp" else "mn"
-}
-
-extract_assumption_row <- function(out, assumption) {
-  assumption_col <- if ("Assumption" %in% names(out$results)) {
-    "Assumption"
-  } else {
-    "Missingness assumption"
-  }
-  idx <- which(out$results[[assumption_col]] == assumption)
-  if (length(idx) == 0) return(NULL)
-  out$results[idx, , drop = FALSE]
-}
-
-extract_result_value <- function(row, candidates) {
-  hit <- intersect(candidates, names(row))
-  if (length(hit) == 0) return(NA)
-  row[[hit[1]]][1]
-}
-
-format_result_ci <- function(row) {
-  if (is.null(row)) return(NA_character_)
-
-  if ("[95% C.I.]" %in% names(row)) {
-    return(row$`[95% C.I.]`[1])
-  }
-
-  if (all(c("CI lower", "CI upper") %in% names(row))) {
-    lower <- row$`CI lower`[1]
-    upper <- row$`CI upper`[1]
-    return(sprintf("[%s, %s]", format(lower, trim = TRUE), format(upper, trim = TRUE)))
-  }
-
-  NA_character_
-}
-
-run_original_rf <- function(dat, y_vars) {
-  lapply(y_vars, function(y) {
-    model <- feols(as.formula(paste0(y, " ~ Z")), data = dat, vcov = "HC1")
-    ct <- coeftable(model)
-    tibble(
-      outcome = y,
-      estimate = unname(ct["Z", "Estimate"]),
-      se = unname(ct["Z", "Std. Error"]),
-      p_value = unname(ct["Z", "Pr(>|t|)"])
-    )
-  }) %>% bind_rows()
-}
-
-run_package_application <- function(dat, y_vars, nperm = 10^4) {
-  map_dfr(seq_along(y_vars), function(i) {
-    y <- y_vars[i]
-    set.seed(20260514 + i - 1)
-    mono_assumption <- choose_monotone_assumption(dat[[y]], dat$Z)
-    out <- ri_sharp_attrition(
-      Z = dat$Z,
-      Y = dat[[y]],
-      c = 0,
-      missing = mono_assumption,
-      class = "RS",
-      method.list = list(name = "Wilcoxon"),
-      nperm = nperm,
-      include_twostep = FALSE
-    )
-
-    general_row <- extract_assumption_row(out, "general")
-    mono_row <- extract_assumption_row(out, mono_assumption)
-
-    tibble(
-      outcome = y,
-      mono_assumption = mono_assumption,
-      n_total = out$counts$n_total,
-      n_missing = out$counts$n_miss,
-      attrition_rate = out$counts$attrition_rate_total,
-      p_obs_treat = out$counts$n_obs_treat / out$counts$n_treat,
-      p_obs_control = out$counts$n_obs_control / out$counts$n_control,
-      general_value = extract_result_value(general_row, c("Value", "Test stat. value")),
-      general_p = extract_result_value(general_row, c("P-value")),
-      general_ci = format_result_ci(general_row),
-      mono_value = extract_result_value(mono_row, c("Value", "Test stat. value")),
-      mono_p = extract_result_value(mono_row, c("P-value")),
-      mono_ci = format_result_ci(mono_row)
-    )
-  })
-}
-
-# Missingness regression diagnostics, shared with the other application notes.
-# M = 1 if the unit is observed at wave 3, as in Li, Sheng & Yu (2025).
-source("attrition_regressions.R")
-# Table captions go through Markdown: escape "*" so Y*_i(0) keeps its star.
-md_caption0 <- function(...) gsub("*", "\\*", paste0(...), fixed = TRUE)
-
-observability_regressions <- function(dat, covariates, m_var = "panelmerged_wave3") {
-  attrition_regressions(
-    M = as.integer(dat[[m_var]] == 1),
-    Z = dat$Z,
-    X = dat[covariates]
-  )
-}
-```
-
-## Define Analysis Samples
-
-```{r}
-chen_table3 <- chen_yang %>%
-  filter(panelmerged_wave3 == 1) %>%
-  filter(D_prior_vpn_user != 1)
-
-chen_full <- chen_yang %>%
-  filter(D_prior_vpn_user != 1)
-
-contrast_AE_table3 <- make_contrast(chen_table3, "Z_treatment_vpnnl")
-contrast_A_table3 <- make_contrast(chen_table3, "Z_treatment_vpnonly")
-contrast_CE_table3 <- make_contrast(chen_table3, "Z_treatment_nlonly")
-
-contrast_AE_full <- make_contrast(chen_full, "Z_treatment_vpnnl")
-contrast_A_full <- make_contrast(chen_full, "Z_treatment_vpnonly")
-contrast_CE_full <- make_contrast(chen_full, "Z_treatment_nlonly")
-
-contrast_sizes <- tibble(
-  contrast = c("AE vs Control", "A vs Control", "CE vs Control"),
-  n_table3 = c(nrow(contrast_AE_table3), nrow(contrast_A_table3), nrow(contrast_CE_table3)),
-  n_full = c(nrow(contrast_AE_full), nrow(contrast_A_full), nrow(contrast_CE_full))
+contrasts <- list(
+  "AE vs C" = make_contrast("treatment_vpnnl"),
+  "A vs C" = make_contrast("treatment_vpnonly"),
+  "CE vs C" = make_contrast("treatment_nlonly")
 )
 
-kable(contrast_sizes, digits = 0)
+sapply(contrasts, nrow)
 ```
 
-## Reproducing the Original Table 3 Benchmarks
+### Do the data contradict the monotone assumption?
 
-This section uses the paper's wave-3 respondent sample and drops prior VPN users.
-It therefore mirrors the conventional complete-case logic in the published table.
+The package tests the assumption it is asked to use: for `missing = "mp"`,
+`ri_sharp_attrition()` reports a p-value for H0: M_i(1) >= M_i(0) for every
+student, from `test_monotone_missingness()`. The missingness indicator M is
+observed for every randomized student, so the effect of treatment on M can be
+tested like any other effect. A low response rate in the treated group is
+evidence against `mp`; a high one is evidence against the opposite assumption,
+`mn` (M_i(1) <= M_i(0)). Under complete randomization the p-values are exact
+(one-sided Fisher exact tests). The five outcome indices are missing for exactly
+the same students (see Data Sources), so one test per comparison covers all five
+outcomes. The test is explained and checked against the theory and against
+RIQITE's `pval_bound()` in `monotone_missingness_test_check.qmd`.
 
 ```{r}
-rf_AE <- run_original_rf(contrast_AE_table3, outcomes) %>% mutate(contrast = "AE vs Control")
-rf_A <- run_original_rf(contrast_A_table3, outcomes) %>% mutate(contrast = "A vs Control")
-rf_CE <- run_original_rf(contrast_CE_table3, outcomes) %>% mutate(contrast = "CE vs Control")
+mono_table <- NULL
+for (name in names(contrasts)) {
+  dat <- contrasts[[name]]
+  mp <- test_monotone_missingness(dat$Z, dat$az_overall_a_w3, assumption = "mp")
+  mn <- test_monotone_missingness(dat$Z, dat$az_overall_a_w3, assumption = "mn")
+  mono_table <- rbind(mono_table, data.frame(
+    Comparison = name,
+    `Response rate, treated` = .ri_pct(mp$response_rate_treat),
+    `Response rate, control` = .ri_pct(mp$response_rate_control),
+    `p-value, H0: mp` = .ri_pvalue(mp$p_value),
+    `p-value, H0: mn` = .ri_pvalue(mn$p_value),
+    check.names = FALSE
+  ))
+}
 
-rf_all <- bind_rows(rf_AE, rf_A, rf_CE) %>%
-  mutate(outcome_label = outcome_labels[outcome]) %>%
-  select(contrast, outcome_label, estimate, se, p_value)
-
-kable(rf_all, digits = 3)
+kable(
+  mono_table,
+  align = c("l", "r", "r", "r", "r"),
+  caption = "Tests of monotone missingness. Exact one-sided tests under complete randomization within each comparison."
+)
 ```
+
+- Neither `mp` nor `mn` is rejected in any comparison. The treated response
+  rates are 1 to 5 percentage points higher than the control rate, which is too
+  small a difference to tell the direction of the treatment's effect on
+  response.
+- The choice of `mp` rests on the substantive argument above; this test is
+  reported as a diagnostic, not as evidence that `mp` holds.
+- A large p-value does not show that `mp` holds. The test only sees the net
+  difference in response rates, so students whose outcome the treatment made
+  missing can be offset by students whose outcome it made observed.
 
 ## Applying `ri_sharp_attrition()`
 
-This section moves to the full contrast sample, still excluding prior VPN users,
-and applies the updated package outcome by outcome. For each outcome:
+```{r}
+ri_outputs <- list()
+for (i in seq_along(contrasts)) {
+  name <- names(contrasts)[i]
+  dat <- contrasts[[name]]
+  ri_outputs[[name]] <- list()
+  for (k in seq_along(outcomes)) {
+    set.seed(20190 + 10 * i + k)
+    ri_outputs[[name]][[outcomes[k]]] <- ri_sharp_attrition(
+      Z = dat$Z,
+      Y = dat[[outcomes[k]]],
+      missing = "mp",
+      nperm = nperm,
+      outcome_name = outcomes[k]
+    )
+  }
+}
+```
 
-- `general` is always reported;
-- a one-sided monotone restriction is chosen from the observed arm-specific
-  observability rates; and
-- the package prints the corresponding finite-sample RI summaries.
-
-### AE vs Control
+### Full output: AE vs. control, media index
 
 ```{r}
-set.seed(20260514)
-ae_media_direct <- ri_sharp_attrition(
-  Z = contrast_AE_full$Z,
-  Y = contrast_AE_full$Y_az_overall_a_w3,
-  c = 0,
-  missing = choose_monotone_assumption(
-    contrast_AE_full$Y_az_overall_a_w3,
-    contrast_AE_full$Z
-  ),
-  class = "RS",
-  method.list = list(name = "Wilcoxon"),
-  nperm = nperm,
-  include_twostep = FALSE
-)
-
-ae_media_direct
+ri_outputs[["AE vs C"]][["az_overall_a_w3"]]
 ```
+
+### Full output: A vs. control, media index
 
 ```{r}
-ae_results <- run_package_application(contrast_AE_full, outcomes, nperm = nperm) %>%
-  mutate(contrast = "AE vs Control", outcome_label = outcome_labels[outcome]) %>%
-  select(contrast, outcome_label, mono_assumption, attrition_rate,
-         p_obs_treat, p_obs_control, general_p, general_ci, mono_p, mono_ci)
-
-kable(show_rates_as_pct(ae_results), digits = 3, caption = mc_caption)
+ri_outputs[["A vs C"]][["az_overall_a_w3"]]
 ```
 
-### A vs Control
+### All comparisons and outcomes
 
 ```{r}
-set.seed(20260514)
-a_media_direct <- ri_sharp_attrition(
-  Z = contrast_A_full$Z,
-  Y = contrast_A_full$Y_az_overall_a_w3,
-  c = 0,
-  missing = choose_monotone_assumption(
-    contrast_A_full$Y_az_overall_a_w3,
-    contrast_A_full$Z
-  ),
-  class = "RS",
-  method.list = list(name = "Wilcoxon"),
-  nperm = nperm,
-  include_twostep = FALSE
-)
+group_of <- c("AE vs C" = "AE", "A vs C" = "A", "CE vs C" = "CE")
 
-a_media_direct
-```
+ri_table <- NULL
+for (name in names(contrasts)) {
+  for (y in outcomes) {
+    res <- ri_outputs[[name]][[y]]$results
+    general_row <- res[res$`Missingness assumption` == "general", ]
+    mp_row <- res[res$`Missingness assumption` == "mp", ]
+    paper_row <- table3[table3$Group == group_of[[name]] & table3$Outcome == outcome_labels[[y]], ]
 
-```{r}
-a_results <- run_package_application(contrast_A_full, outcomes, nperm = nperm) %>%
-  mutate(contrast = "A vs Control", outcome_label = outcome_labels[outcome]) %>%
-  select(contrast, outcome_label, mono_assumption, attrition_rate,
-         p_obs_treat, p_obs_control, general_p, general_ci, mono_p, mono_ci)
+    ri_table <- rbind(ri_table, data.frame(
+      Comparison = name,
+      Outcome = outcome_labels[[y]],
+      `Paper [SE]` = paper_row$`Paper [SE]`,
+      `OLS p-value` = paper_row$`OLS p-value`,
+      `RI p-value, unrestricted` = .ri_pvalue(general_row$`P-value`),
+      `RI p-value, mp` = .ri_pvalue(mp_row$`P-value`),
+      `95% CI, mp` = .ri_ci_text(mp_row$`CI lower`, mp_row$`CI upper`),
+      check.names = FALSE
+    ))
+  }
+}
 
-kable(show_rates_as_pct(a_results), digits = 3, caption = mc_caption)
-```
-
-### CE vs Control
-
-```{r}
-set.seed(20260514)
-ce_media_direct <- ri_sharp_attrition(
-  Z = contrast_CE_full$Z,
-  Y = contrast_CE_full$Y_az_overall_a_w3,
-  c = 0,
-  missing = choose_monotone_assumption(
-    contrast_CE_full$Y_az_overall_a_w3,
-    contrast_CE_full$Z
-  ),
-  class = "RS",
-  method.list = list(name = "Wilcoxon"),
-  nperm = nperm,
-  include_twostep = FALSE
-)
-
-ce_media_direct
-```
-
-```{r}
-ce_results <- run_package_application(contrast_CE_full, outcomes, nperm = nperm) %>%
-  mutate(contrast = "CE vs Control", outcome_label = outcome_labels[outcome]) %>%
-  select(contrast, outcome_label, mono_assumption, attrition_rate,
-         p_obs_treat, p_obs_control, general_p, general_ci, mono_p, mono_ci)
-
-kable(show_rates_as_pct(ce_results), digits = 3, caption = mc_caption)
-```
-
-## Visualizing Inference
-
-This section uses the media outcome for all three contrasts so that
-`general`, `mp`, and `complete-case` inference can be compared directly.
-
-### AE vs Control: general missingness
-
-```{r, fig.width=9, fig.height=5}
-set.seed(11215)
-ae_media_general_plot <- plot_ri_test_stat(
-  Z = contrast_AE_full$Z,
-  Y = contrast_AE_full$Y_az_overall_a_w3,
-  c = 0,
-  missing = "general",
-  class = "RS",
-  method.list = list(name = "Wilcoxon"),
-  nperm = nperm
-)
-```
-
-### AE vs Control: monotone positive missingness
-
-```{r, fig.width=9, fig.height=5}
-set.seed(11215)
-ae_media_mp_plot <- plot_ri_test_stat(
-  Z = contrast_AE_full$Z,
-  Y = contrast_AE_full$Y_az_overall_a_w3,
-  c = 0,
-  analysis = "mp",
-  missing = "mp",
-  class = "RS",
-  method.list = list(name = "Wilcoxon"),
-  nperm = nperm
-)
-```
-
-### AE vs Control: complete-case analysis
-
-```{r, fig.width=9, fig.height=5}
-set.seed(11215)
-ae_media_complete_plot <- plot_ri_test_stat(
-  Z = contrast_AE_full$Z,
-  Y = contrast_AE_full$Y_az_overall_a_w3,
-  c = 0,
-  analysis = "complete-case",
-  class = "RS",
-  method.list = list(name = "Wilcoxon"),
-  nperm = nperm
-)
-```
-
-```{r}
-bind_rows(
-  tibble(
-    analysis = ae_media_general_plot$mode_label,
-    assumption = ae_media_general_plot$assumption,
-    observed_statistic = ae_media_general_plot$stat_obs,
-    p_value = ae_media_general_plot$p_value,
-    design = ae_media_general_plot$design,
-    `MC replications` = ae_media_general_plot$mc_replications
-  ),
-  tibble(
-    analysis = ae_media_mp_plot$mode_label,
-    assumption = ae_media_mp_plot$assumption,
-    observed_statistic = ae_media_mp_plot$stat_obs,
-    p_value = ae_media_mp_plot$p_value,
-    design = ae_media_mp_plot$design,
-    `MC replications` = ae_media_mp_plot$mc_replications
-  ),
-  tibble(
-    analysis = ae_media_complete_plot$mode_label,
-    assumption = ae_media_complete_plot$assumption,
-    observed_statistic = ae_media_complete_plot$stat_obs,
-    p_value = ae_media_complete_plot$p_value,
-    design = ae_media_complete_plot$design,
-    `MC replications` = ae_media_complete_plot$mc_replications
+kable(
+  ri_table,
+  align = c("l", "l", "r", "r", "r", "r", "r"),
+  caption = paste(
+    "OLS p-values: two-sided, endline respondents only (as in the paper).",
+    "RI p-values: one-sided against a positive effect, all randomized students,",
+    "10,000 MC replications, complete randomization within each comparison."
   )
-) %>%
-  kable(digits = 3)
-```
-
-### A vs Control: general missingness
-
-```{r, fig.width=9, fig.height=5}
-set.seed(11215)
-a_media_general_plot <- plot_ri_test_stat(
-  Z = contrast_A_full$Z,
-  Y = contrast_A_full$Y_az_overall_a_w3,
-  c = 0,
-  missing = "general",
-  class = "RS",
-  method.list = list(name = "Wilcoxon"),
-  nperm = nperm
 )
 ```
 
-### A vs Control: monotone positive missingness
+How to read the table:
+
+- **Unrestricted (`general`).** With no assumption about who drops out, none of the
+  effects is significant. About a quarter of the outcomes are missing, and the worst
+  case for these missing outcomes is enough to explain every observed difference.
+- **Monotone positive (`mp`).** All five AE effects stay significant. The A and CE
+  effects, including the access-only effect on the media index (OLS p =
+  `r a_media_ols_p`), are
+  not significant.
+
+## Visualizing the Randomization Distributions
+
+The figures show, for the media index, the randomization distribution of the
+Wilcoxon statistic under the sharp null of no effect, with the observed statistic
+marked. For each comparison there are three versions: no assumption about attrition
+(`general`), monotone positive attrition (`mp`), and a complete-case analysis that
+ignores the students with missing outcomes.
 
 ```{r, fig.width=9, fig.height=5}
-set.seed(11215)
-a_media_mp_plot <- plot_ri_test_stat(
-  Z = contrast_A_full$Z,
-  Y = contrast_A_full$Y_az_overall_a_w3,
-  c = 0,
-  analysis = "mp",
-  missing = "mp",
-  class = "RS",
-  method.list = list(name = "Wilcoxon"),
-  nperm = nperm
+analysis_labels <- c(
+  general = "no assumption on attrition",
+  mp = "monotone positive attrition",
+  "complete-case" = "complete cases only"
 )
-```
 
-### A vs Control: complete-case analysis
-
-```{r, fig.width=9, fig.height=5}
-set.seed(11215)
-a_media_complete_plot <- plot_ri_test_stat(
-  Z = contrast_A_full$Z,
-  Y = contrast_A_full$Y_az_overall_a_w3,
-  c = 0,
-  analysis = "complete-case",
-  class = "RS",
-  method.list = list(name = "Wilcoxon"),
-  nperm = nperm
-)
+plot_summary <- NULL
+for (name in names(contrasts)) {
+  dat <- contrasts[[name]]
+  for (analysis in names(analysis_labels)) {
+    set.seed(11215)
+    p <- plot_ri_test_stat(
+      Z = dat$Z,
+      Y = dat$az_overall_a_w3,
+      analysis = analysis,
+      missing = if (analysis == "mp") "mp" else "general",
+      nperm = nperm,
+      main = paste0(name, ", media index")
+    )
+    plot_summary <- rbind(plot_summary, data.frame(
+      Comparison = name,
+      Analysis = analysis_labels[[analysis]],
+      `Observed statistic` = fmt3(p$stat_obs),
+      `p-value` = .ri_pvalue(p$p_value),
+      check.names = FALSE
+    ))
+  }
+}
 ```
 
 ```{r}
-bind_rows(
-  tibble(
-    analysis = a_media_general_plot$mode_label,
-    assumption = a_media_general_plot$assumption,
-    observed_statistic = a_media_general_plot$stat_obs,
-    p_value = a_media_general_plot$p_value,
-    design = a_media_general_plot$design,
-    `MC replications` = a_media_general_plot$mc_replications
-  ),
-  tibble(
-    analysis = a_media_mp_plot$mode_label,
-    assumption = a_media_mp_plot$assumption,
-    observed_statistic = a_media_mp_plot$stat_obs,
-    p_value = a_media_mp_plot$p_value,
-    design = a_media_mp_plot$design,
-    `MC replications` = a_media_mp_plot$mc_replications
-  ),
-  tibble(
-    analysis = a_media_complete_plot$mode_label,
-    assumption = a_media_complete_plot$assumption,
-    observed_statistic = a_media_complete_plot$stat_obs,
-    p_value = a_media_complete_plot$p_value,
-    design = a_media_complete_plot$design,
-    `MC replications` = a_media_complete_plot$mc_replications
-  )
-) %>%
-  kable(digits = 3)
+kable(plot_summary, align = c("l", "l", "r", "r"))
 ```
 
-### CE vs Control: general missingness
-
-```{r, fig.width=9, fig.height=5}
-set.seed(11215)
-ce_media_general_plot <- plot_ri_test_stat(
-  Z = contrast_CE_full$Z,
-  Y = contrast_CE_full$Y_az_overall_a_w3,
-  c = 0,
-  missing = "general",
-  class = "RS",
-  method.list = list(name = "Wilcoxon"),
-  nperm = nperm
-)
-```
-
-### CE vs Control: monotone positive missingness
-
-```{r, fig.width=9, fig.height=5}
-set.seed(11215)
-ce_media_mp_plot <- plot_ri_test_stat(
-  Z = contrast_CE_full$Z,
-  Y = contrast_CE_full$Y_az_overall_a_w3,
-  c = 0,
-  analysis = "mp",
-  missing = "mp",
-  class = "RS",
-  method.list = list(name = "Wilcoxon"),
-  nperm = nperm
-)
-```
-
-### CE vs Control: complete-case analysis
-
-```{r, fig.width=9, fig.height=5}
-set.seed(11215)
-ce_media_complete_plot <- plot_ri_test_stat(
-  Z = contrast_CE_full$Z,
-  Y = contrast_CE_full$Y_az_overall_a_w3,
-  c = 0,
-  analysis = "complete-case",
-  class = "RS",
-  method.list = list(name = "Wilcoxon"),
-  nperm = nperm
-)
-```
-
-```{r}
-bind_rows(
-  tibble(
-    analysis = ce_media_general_plot$mode_label,
-    assumption = ce_media_general_plot$assumption,
-    observed_statistic = ce_media_general_plot$stat_obs,
-    p_value = ce_media_general_plot$p_value,
-    design = ce_media_general_plot$design,
-    `MC replications` = ce_media_general_plot$mc_replications
-  ),
-  tibble(
-    analysis = ce_media_mp_plot$mode_label,
-    assumption = ce_media_mp_plot$assumption,
-    observed_statistic = ce_media_mp_plot$stat_obs,
-    p_value = ce_media_mp_plot$p_value,
-    design = ce_media_mp_plot$design,
-    `MC replications` = ce_media_mp_plot$mc_replications
-  ),
-  tibble(
-    analysis = ce_media_complete_plot$mode_label,
-    assumption = ce_media_complete_plot$assumption,
-    observed_statistic = ce_media_complete_plot$stat_obs,
-    p_value = ce_media_complete_plot$p_value,
-    design = ce_media_complete_plot$design,
-    `MC replications` = ce_media_complete_plot$mc_replications
-  )
-) %>%
-  kable(digits = 3)
-```
+The complete-case p-values treat the endline respondents as if they were the whole
+randomized sample. They are close to the paper's conclusions, which rest on the same
+respondents.
 
 ## Attrition Diagnostics
 
-### Arm-specific observability
+These diagnostics follow the other application notes. `M = 1` means the student
+completed the endline survey (as in Li, Sheng & Yu 2025); this is the same for all
+five outcomes. The covariates are baseline characteristics built by the authors'
+do-file. Students with a missing covariate are left out of these regressions.
 
 ```{r}
-diagnostic_overview <- bind_rows(
-  ae_results,
-  a_results,
-  ce_results
-) %>%
-  select(contrast, outcome_label, attrition_rate, p_obs_treat, p_obs_control, mono_assumption)
+covars <- c(
+  "h_gender", "h_birth_year", "h_ethnicity_han", "h_hukou_urban",
+  "h_religion_religious", "h_ccp_member", "h_university_elite",
+  "h_hs_track_science", "h_department_ssh", "h_birthplace_coastal",
+  "h_residence_coastal", "h_domestic_english_atleast4", "h_foreign_english_yes",
+  "h_travel_hktaiwan", "h_travel_foreign_yes", "h_siblings_total",
+  "h_father_edu_hsabove", "h_mother_edu_hsabove", "h_father_ccp",
+  "h_mother_ccp", "h_work_father_govt", "h_work_mother_govt", "h_hh_income",
+  "h_az_preference_risk", "h_az_preference_time", "h_az_preference_altruism",
+  "h_az_preference_reciprocity"
+)
 
-kable(show_rates_as_pct(diagnostic_overview), digits = 3)
+diagnostics <- list()
+for (name in names(contrasts)) {
+  dat <- contrasts[[name]]
+  diagnostics[[name]] <- list(
+    regressions = attrition_regressions(
+      M = as.integer(dat$panelmerged_wave3 == 1),
+      Z = dat$Z,
+      X = dat[covars]
+    ),
+    prognostic = prognostic_check(
+      Y = dat$az_overall_a_w3,
+      Z = dat$Z,
+      X = dat[covars]
+    )
+  )
+}
 ```
-
-The remaining diagnostics use a single outcome-agnostic observability indicator,
-`M = 1{ observed at wave 3 }`. In this dataset, that indicator is identical to
-the missingness pattern for all five Table 3 outcome families, so it provides a
-clean summary of overall attrition.
 
 ### Regressions by experimental group
 
-These tables follow the Gerber and Green template by estimating `M ~ X`
-separately within the control arm and the treatment arm. As in Li, Sheng & Yu
-(2025), `M = 1` means the unit is observed at wave 3, so a positive coefficient
-means a higher probability of being observed (less attrition).
-
-The `Difference (T - C)` column reports, for each covariate, the
-treatment-group coefficient minus the control-group coefficient and its
-p-value. The last two rows give the slopes test (do the covariates predict `M`
-in the same way in both arms?) and the Chow test (do the two arms share the
-whole regression, constant included?).
-
-```{r}
-ae_ar <- observability_regressions(contrast_AE_full, covars)
-a_ar <- observability_regressions(contrast_A_full, covars)
-ce_ar <- observability_regressions(contrast_CE_full, covars)
-
-group_kable <- function(ar, contrast) {
-  kable(
+```{r, results='asis'}
+for (name in names(contrasts)) {
+  ar <- diagnostics[[name]]$regressions
+  print(kable(
     attrition_table(ar, type = "group"),
     align = c("l", "r", "r", "r", "r"),
-    caption = md_caption0(contrast, ". ", attrition_table_note(ar, type = "group"))
-  )
+    caption = md_caption(paste0(name, ".", " ", attrition_table_note(ar, type = "group")))
+  ))
+  cat("\n\n")
 }
-
-group_kable(ae_ar, "AE vs Control")
-group_kable(a_ar, "A vs Control")
-group_kable(ce_ar, "CE vs Control")
 ```
 
 ### Missingness regressions with and without interactions
 
-The next tables report:
-
-- regression (a): `M ~ X`
-- regression (b): `M ~ X + Z + Z × X`
-
-Each table note gives the joint tests: all `X` coefficients in regression (a)
-equal zero; all `Z × X` coefficients in regression (b) equal zero (slopes
-test); and `Z` together with all `Z × X` coefficients equal zero (Chow test).
-
-```{r}
-pooled_kable <- function(ar, contrast) {
-  kable(
+```{r, results='asis'}
+for (name in names(contrasts)) {
+  ar <- diagnostics[[name]]$regressions
+  print(kable(
     attrition_table(ar, type = "pooled"),
     align = c("l", "r", "r"),
-    caption = md_caption0(contrast, ". ", attrition_table_note(ar, type = "pooled"))
-  )
+    caption = md_caption(paste0(name, ".", " ", attrition_table_note(ar, type = "pooled")))
+  ))
+  cat("\n\n")
 }
-
-pooled_kable(ae_ar, "AE vs Control")
-pooled_kable(a_ar, "A vs Control")
-pooled_kable(ce_ar, "CE vs Control")
 ```
 
 ### Are covariates linked to differential attrition also prognostic of Y?
 
-Differential attrition on a covariate can bias the comparison of observed
-outcomes only if that covariate also predicts the outcome. For the media
-outcome (`Y_az_overall_a_w3`) in each contrast we:
+For the media index in each comparison:
 
-1. regress `Y` on `X` among control-group units with observed outcomes, which
-   describes how the covariates predict `Y*_i(0)` (prognostic);
-2. put each covariate's differential-attrition coefficient (`Z × X` in the
+1. regress Y on the covariates among control students with observed outcomes, which
+   describes how the covariates predict Y*(0);
+2. put each covariate's differential-attrition coefficient (Z × X in the
    missingness regression) next to its prognostic coefficient; and
-3. predict `Y*_i(0)` for every unit from step 1 and compare treated and
-   control units, first among all units in the contrast and then among units
-   with observed outcomes.
+3. predict Y*(0) for every student and compare treated and control students, first
+   among all randomized students and then among those with observed outcomes.
 
-```{r}
-media_prognostic <- function(dat) {
-  prognostic_check(Y = dat$Y_az_overall_a_w3, Z = dat$Z, X = dat[covars])
-}
-
-side_by_side_kable <- function(pc, contrast) {
-  kable(
+```{r, results='asis'}
+for (name in names(contrasts)) {
+  pc <- diagnostics[[name]]$prognostic
+  print(kable(
     prognostic_table(pc, type = "side_by_side"),
     align = c("l", "r", "r", "r", "r"),
-    caption = md_caption0(contrast, ", media outcome: differential attrition and prognostic power by covariate. ",
-                     prognostic_table_note(pc, type = "side_by_side"))
-  )
-}
-
-score_kable <- function(pc, contrast) {
-  kable(
+    caption = md_caption(paste0(name, ", media index: differential attrition and prognostic power by covariate. ",
+                                prognostic_table_note(pc, type = "side_by_side")))
+  ))
+  cat("\n\n")
+  print(kable(
     prognostic_table(pc, type = "score"),
     align = c("l", "r", "r", "r"),
-    caption = md_caption0(contrast, ", media outcome: treated-minus-control differences in predicted Y*(0) and in observed Y. ",
-                     prognostic_table_note(pc, type = "score"))
-  )
+    caption = md_caption(paste0(name, ", media index: treated-minus-control differences in predicted Y*(0) and in observed Y. ",
+                                prognostic_table_note(pc, type = "score")))
+  ))
+  cat("\n\n")
 }
-
-ae_pc <- media_prognostic(contrast_AE_full)
-a_pc <- media_prognostic(contrast_A_full)
-ce_pc <- media_prognostic(contrast_CE_full)
-
-side_by_side_kable(ae_pc, "AE vs Control")
-score_kable(ae_pc, "AE vs Control")
-side_by_side_kable(a_pc, "A vs Control")
-score_kable(a_pc, "A vs Control")
-side_by_side_kable(ce_pc, "CE vs Control")
-score_kable(ce_pc, "CE vs Control")
 ```
 
 These checks cover observed covariates only; unobserved factors can still drive
 differential attrition.
+
+## Notes and Limitations
+
+- **Strata are ignored.** The paper stratified by university, gender, and cohort.
+  The tests here treat each comparison as completely randomized until the package's
+  blocked-design option is revised.
+- **One-sided p-values.** The randomization p-values test against a positive
+  effect; the paper's OLS p-values are two-sided. For positive estimates the
+  one-sided test is the more lenient one, so the loss of significance under `mp` is
+  not caused by the choice of a one-sided test.
+- **The `mp` assumption.** It is plausible here, and the test of monotone
+  missingness does not reject it, but no test can confirm it. Under `general`,
+  which needs no assumption, no effect is significant.
+- **Paper's attrition test.** We could not reproduce the reported p = 0.782 for
+  differences in attrition by treatment status.

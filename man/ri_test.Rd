@@ -81,7 +81,10 @@ missing if any individual outcome is missing.}
 \item{outcome_name}{Name of the outcome shown in the printed output. By default it is taken from the \code{Y} argument, e.g. \code{data$y} gives \code{y}.}
 }
 \value{
-An object of class \code{riattrition_result}.
+An object of class \code{riattrition_result}. When \code{missing} is
+\code{"mp"} or \code{"mn"}, its component \code{monotone_test} holds the test of
+that assumption from \code{\link{test_monotone_missingness}()}, and the printed
+output reports its p-value.
 }
 \description{
 \code{ri_sharp_attrition()} wraps the existing sharp-null attrition inference

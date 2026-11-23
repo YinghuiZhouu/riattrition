@@ -176,7 +176,9 @@ source(file.path(package_dir, "R", "0_function_sharp_null.R"))
 source(file.path(package_dir, "R", "0_function_sharp_null_twostep.R"))
 source(file.path(package_dir, "R", "1_result_output.R"))
 source(file.path(package_dir, "R", "2_visualization.R"))
-source(file.path(package_dir, "analysis", "attrition_regressions.R"))
+source(file.path(package_dir, "R", "4_missingness_tests.R"))
+source(file.path(package_dir, "R", "3_attrition_diagnostics.R"))
+source(file.path(package_dir, "analysis", "prognostic_check.R"))
 ```
 
 ## Load Replication Data
@@ -444,8 +446,9 @@ survive once the missing outcomes are bounded, even under `mp`.
 ### Ties and the confidence intervals
 
 The indices take few distinct values, so many respondents share the same value.
-The Wilcoxon statistic in the package ranks tied values by their row order
-(`ties.method = "first"`). Under the null of a constant effect c, the package
+The package first puts the respondents in random order and then ranks tied
+values by their position (`ties.method = "first"`), as in Li, Sheng & Yu (2025,
+Section 4.2.2). Under the null of a constant effect c, the package
 subtracts c from the treated outcomes. When c is exactly 0, tied treated and
 control outcomes stay tied. When c is not 0, even by 0.001, every treated outcome
 moves just below or just above all control outcomes it was tied with, and the
@@ -591,9 +594,9 @@ kable(
   randomization test could not reproduce the blocked design exactly. Attrition is
   also similar across class types (about 4% in each).
 - **Ties.** The indices are averages of a few five-point items, so they take few
-  distinct values (24, 48, and 15). Because the Wilcoxon statistic breaks ties by
-  row order, the confidence intervals are not informative here (see above), and
-  the p-values can change slightly if the rows are reordered.
+  distinct values (24, 48, and 15). Ties are broken in a random order, so the
+  confidence intervals are not informative here (see above), and the p-values
+  can change slightly with the random order (that is, with the seed).
 - **Two kinds of missingness.** The analysis treats respondents who were not found
   and respondents who skipped too many items in the same way. The `mp` assumption
   must hold for both.

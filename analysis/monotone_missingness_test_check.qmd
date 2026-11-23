@@ -1,0 +1,744 @@
+---
+title: "How `test_monotone_missingness()` works: theory and checks"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+    code-fold: false
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Purpose
+
+`test_monotone_missingness()` gives a p-value for the monotone missingness
+assumption used by `ri_sharp_attrition(missing = "mp")` or `"mn"`. This note
+explains the theory behind it (Caughey, Dafoe, Li and Miratrix 2023), explains
+step by step what the function does (section 3, with a hand calculation that
+reproduces its output), and checks it in five ways:
+
+1. against a full enumeration of all treatment assignments and against R's
+   Fisher exact test;
+2. against `pval_bound()` from Xinran Li's RIQITE package;
+3. its type I error over **every** population that satisfies the assumption
+   (exact calculation);
+4. what it can and cannot detect when the assumption fails;
+5. the version for blocked designs.
+
+## Setup
+
+```{r}
+package_dir <- normalizePath("..")
+for (f in c("0_function_sharp_null.R", "0_function_sharp_null_twostep.R",
+            "1_result_output.R", "4_missingness_tests.R")) {
+  source(file.path(package_dir, "R", f))
+}
+
+library(haven)
+library(knitr)
+
+# RIQITE, downloaded from https://github.com/li-xinran/RIQITE (commit b45b820,
+# November 20, 2026). Only the two files with the inference functions are
+# loaded, into their own environment: RIQITE also has functions called
+# test_stat(), null_dist() and assign_CRE(), and they must not replace ours.
+riqite_dir <- "/Users/yinghuizhou/Library/CloudStorage/Dropbox/Projects/attrition application package/personal/third_party/RIQITE_b45b820"
+riqite <- new.env()
+for (f in c("RI_Quantile_20220919.R", "RI_bound_20220919.R")) {
+  sys.source(file.path(riqite_dir, "R", f), envir = riqite)
+}
+
+fmt3 <- function(x) formatC(x, digits = 3, format = "f")
+fmt4 <- function(x) formatC(x, digits = 4, format = "f")
+
+# Chen and Yang (2019): randomized students (existing users excluded), and the
+# AE vs. control comparison with the paper's strata (university x gender x
+# cohort), used for illustration in sections 3 and 8.
+chen <- zap_labels(read_dta("/Users/yinghuizhou/Library/CloudStorage/Dropbox/Projects/intro_rand_inf_missing/0_paper and data survey/1_field experiments/datasets_potential/3 Chen and Yang -- Media censorship/panelsurvey_clean.dta"))
+chen <- chen[chen$treatment_user == 0, ]
+ae <- chen[chen$treatment_vpnnl == 1 | chen$treatment_control == 1, ]
+ae$stratum <- paste(ae$university, ae$gender, ae$year_started_college)
+```
+
+## 1. The hypothesis
+
+For each unit i, M_i(z) = 1 if its outcome would be observed under treatment
+z, and 0 if it would be missing (Li, Sheng and Yu 2025). The effect of the
+treatment on missingness for unit i is
+
+  tau_i = M_i(1) - M_i(0), which is -1, 0 or 1.
+
+| Assumption | In words | As a hypothesis on tau |
+|:--|:--|:--|
+| mp: M_i(1) >= M_i(0) for every unit | treatment never makes an outcome missing | tau_i >= 0 for every unit |
+| mn: M_i(1) <= M_i(0) for every unit | treatment never makes an outcome observed | tau_i <= 0 for every unit |
+
+Unlike a sharp null (tau_i = 0 for every unit), these hypotheses allow the
+effects to differ across units. Caughey et al. (2023) call them **bounded null
+hypotheses**. Because M is observed for every unit (we always know whose
+outcome is missing), we can test them like hypotheses about any other outcome.
+
+Four types of units are possible:
+
+| Type | M_i(0) | M_i(1) | tau_i | Allowed under mp? |
+|:--|--:|--:|--:|:--|
+| always observed | 1 | 1 | 0 | yes |
+| never observed | 0 | 0 | 0 | yes |
+| helped (observed only if treated) | 0 | 1 | +1 | yes |
+| harmed (observed only if control) | 1 | 0 | -1 | **no** |
+
+mp holds exactly when there are no harmed units.
+
+## 2. Why a test of "no effect" is valid for the bounded null
+
+Caughey et al. (2023) show the following. Take a test statistic that is
+**effect increasing**: it does not decrease when a treated unit's outcome
+increases or when a control unit's outcome decreases. The difference in means,
+treated minus control, is such a statistic. Then the one-sided randomization
+p-value computed as if the sharp null of no effect were true is also a valid
+p-value for the bounded null.
+
+The intuition for mp, where the evidence against the hypothesis is a *low*
+response rate among treated units:
+
+- Under mp, a treated unit is observed at least as often as it would be under
+  control, so treatment can only raise the treated response rate.
+- So under mp, the observed difference in response rates tends to be at least
+  as large as under "no effect", and a test that treats "no effect" as true
+  finds the observed difference unusually low no more often than it should.
+- "No effect" (no helped units) is therefore the least favorable case inside
+  mp, and the test has the right size there.
+
+RIQITE's `pval_bound()` implements this for general outcomes: it tests
+H0: tau_i <= c for all i (`alternative = "greater"`) or H0: tau_i >= c for all
+i (`alternative = "less"`), with the difference in means as the default
+statistic. mp is `c = 0, alternative = "less"`; mn is `c = 0,
+alternative = "greater"`.
+
+## 3. What `test_monotone_missingness()` does, step by step
+
+This section explains the function in detail and then redoes its calculation
+by hand, step by step, for Chen and Yang (AE vs. control, media index). At the
+end of each part, the hand calculation is compared with the function.
+
+### 3.1 Input and output
+
+```r
+test_monotone_missingness(Z, Y, assumption = c("mp", "mn"), block = NULL, nperm = 10^4)
+```
+
+| Argument | Meaning |
+|:--|:--|
+| `Z` | treatment indicator: 1 = treated, 0 = control |
+| `Y` | outcome vector; only whether each value is missing (`NA`) is used |
+| `assumption` | `"mp"` tests H0: M_i(1) >= M_i(0) for every unit; `"mn"` tests H0: M_i(1) <= M_i(0) for every unit |
+| `block` | optional block identifiers; if given, treatment is reshuffled within blocks |
+| `nperm` | number of Monte Carlo draws; used only when `block` is given |
+
+The function returns a list of class `monotone_missingness_test`:
+
+| Element | Meaning |
+|:--|:--|
+| `assumption`, `hypothesis` | the assumption tested, and the hypothesis in words |
+| `design`, `method` | "complete randomization" with "exact", or "blocked randomization" with "Monte Carlo" |
+| `response_rate_treat`, `response_rate_control` | share of treated and of control units whose outcome is observed |
+| `statistic` | treated minus control response rate (block-size weighted under blocks) |
+| `p_value` | the p-value |
+| `mc_replications` | number of Monte Carlo draws (`NA` for the exact test) |
+
+What the function does, in order:
+
+1. Checks the inputs (same length; `Z` is 0/1) and computes M = 1 if `Y` is
+   observed, 0 if `Y` is `NA`.
+2. Computes the response rates and the statistic.
+3. Without `block`: computes the exact p-value from the hypergeometric
+   distribution (section 3.2).
+4. With `block`: summarizes each block, computes the block-weighted statistic,
+   draws its null distribution by Monte Carlo and computes the p-value
+   (section 3.3).
+5. Returns the list above; `print()` shows it in a few lines.
+
+### 3.2 Complete randomization
+
+**Step 1. From Y to M.** Only whether each outcome is missing matters.
+
+```{r}
+Z <- ae$treatment_vpnnl
+Y <- ae$az_overall_a_w3
+M <- as.numeric(!is.na(Y))      # 1 = outcome observed
+
+table(Treatment = Z, Observed = M)
+```
+
+**Step 2. The statistic.** With n units, m of them treated, O observed outcomes
+in total and T treated units with an observed outcome:
+
+```{r}
+n <- length(Z)                  # units
+m <- sum(Z)                     # treated units
+O <- sum(M)                     # units with an observed outcome
+T_obs <- sum(M[Z == 1])         # treated units with an observed outcome
+
+rate_treat <- T_obs / m
+rate_control <- (O - T_obs) / (n - m)
+c(n = n, m = m, O = O, T = T_obs, rate_treat = rate_treat,
+  rate_control = rate_control, difference = rate_treat - rate_control)
+```
+
+The difference in response rates is T / m - (O - T) / (n - m). For fixed n, m
+and O it increases with T, so comparing differences is the same as comparing
+T.
+
+**Step 3. The distribution of T under "no effect on M".** If the treatment had
+no effect on M, every unit's M would be the same whatever the assignment. A
+new random assignment then picks m of the n units, O of which have M = 1, so
+the number of treated units with M = 1, call it T\*, is hypergeometric. Its
+probabilities are `dhyper(t, O, n - O, m)`.
+
+```{r, fig.width=8, fig.height=4.5}
+t_values <- max(0, m - (n - O)):min(m, O)        # possible values of T*
+prob <- dhyper(t_values, O, n - O, m)
+
+shown <- prob > 1e-5                              # leave out invisible bars
+par(mar = c(4.5, 4.5, 1, 1), las = 1)
+plot(t_values[shown], prob[shown], type = "h", lwd = 3, ylim = c(0, 1.35 * max(prob)),
+     col = ifelse(t_values[shown] <= T_obs, "#86B6EF", "#C9C8C2"),
+     xlab = "T* = treated units with an observed outcome, under a new random assignment",
+     ylab = "Probability")
+segments(T_obs, 0, T_obs, 1.1 * max(prob), col = "#D95926", lwd = 2, lty = 2)
+legend("topleft", bty = "n", lwd = c(3, 2), lty = c(1, 2), col = c("#86B6EF", "#D95926"),
+       legend = c("T* <= observed T (counted in the mp p-value)",
+                  paste0("Observed T = ", T_obs)))
+```
+
+**Step 4. The p-value.** For mp, evidence against the assumption is a *low*
+treated response rate, so the p-value is the probability of a T\* at most as
+small as the observed one, the blue bars. For mn it is the probability of a
+T\* at least as large.
+
+```{r}
+p_mp_by_hand <- sum(prob[t_values <= T_obs])
+p_mn_by_hand <- sum(prob[t_values >= T_obs])
+
+kable(data.frame(
+  Assumption = c("mp", "mn"),
+  `By hand (sum of probabilities)` = fmt4(c(p_mp_by_hand, p_mn_by_hand)),
+  `phyper()` = fmt4(c(phyper(T_obs, O, n - O, m),
+                      phyper(T_obs - 1, O, n - O, m, lower.tail = FALSE))),
+  `test_monotone_missingness()` = fmt4(c(
+    test_monotone_missingness(Z, Y, assumption = "mp")$p_value,
+    test_monotone_missingness(Z, Y, assumption = "mn")$p_value
+  )),
+  check.names = FALSE
+), align = c("l", "r", "r", "r"))
+```
+
+The function uses exactly the `phyper()` formulas in the middle column. No
+Monte Carlo is involved, so the result does not depend on a random seed.
+
+### 3.3 Blocked randomization
+
+For illustration only, we treat the paper's strata (university x gender x
+cohort) as blocks; students with a missing gender or cohort form blocks of
+their own here. (The Chen and Yang note itself uses complete randomization;
+see that note for why.)
+
+**Step 1. Summarize each block.** For block b: its size n_b, number treated
+n1_b, number of controls n0_b, number of observed outcomes O_b and number of
+treated units with an observed outcome T_b. Blocks with only treated or only
+control units say nothing about the effect of treatment and are left out.
+
+```{r}
+block <- ae$stratum
+
+blocks <- data.frame(
+  block = names(table(block)),
+  n = as.numeric(table(block)),
+  n_treat = as.numeric(tapply(Z, block, sum)),
+  n_observed = as.numeric(tapply(M, block, sum)),
+  treated_observed = as.numeric(tapply(M * Z, block, sum))
+)
+blocks$n_control <- blocks$n - blocks$n_treat
+kept <- blocks[blocks$n_treat > 0 & blocks$n_control > 0, ]
+
+c(blocks = nrow(blocks), kept = nrow(kept), left_out = nrow(blocks) - nrow(kept))
+```
+
+**Step 2. The block-weighted statistic.** Within each block, the difference in
+response rates is d_b = T_b / n1_b - (O_b - T_b) / n0_b. The statistic is the
+average of the d_b weighted by block size, w_b = n_b / (sum of the n_b).
+
+```{r}
+kept$weight <- kept$n / sum(kept$n)
+kept$diff <- kept$treated_observed / kept$n_treat -
+  (kept$n_observed - kept$treated_observed) / kept$n_control
+statistic <- sum(kept$weight * kept$diff)
+
+kable(data.frame(
+  Block = kept$block, n = kept$n, Treated = kept$n_treat, Control = kept$n_control,
+  Observed = kept$n_observed, `Treated observed` = kept$treated_observed,
+  `Difference d_b` = fmt3(kept$diff), `Weight w_b` = fmt3(kept$weight),
+  check.names = FALSE
+), align = c("l", rep("r", 7)))
+statistic
+```
+
+**Step 3. The null distribution by Monte Carlo.** Reshuffling treatment within
+block b makes T\*_b hypergeometric (n1_b units drawn from n_b, of which O_b
+have M = 1), independently across blocks. So we draw the T\*_b directly, block
+by block, and recompute the statistic of Step 2 for each draw.
+
+```{r}
+nperm <- 10^4
+set.seed(1)
+draws <- sapply(seq_len(nrow(kept)), function(b) {
+  rhyper(nperm, kept$n_observed[b], kept$n[b] - kept$n_observed[b], kept$n_treat[b])
+})
+# draws: one row per Monte Carlo draw, one column per block.
+
+stat_null <- numeric(nperm)
+for (r in seq_len(nperm)) {
+  T_r <- draws[r, ]
+  diff_r <- T_r / kept$n_treat - (kept$n_observed - T_r) / kept$n_control
+  stat_null[r] <- sum(kept$weight * diff_r)
+}
+```
+
+```{r, fig.width=8, fig.height=4.5}
+breaks <- seq(min(stat_null), max(stat_null), length.out = 50)
+counts <- hist(stat_null, breaks = breaks, plot = FALSE)
+par(mar = c(4.5, 4.5, 1, 1), las = 1)
+plot(counts, freq = FALSE, border = "white", main = "", ylim = c(0, 1.35 * max(counts$density)),
+     col = ifelse(counts$mids <= statistic, "#86B6EF", "#C9C8C2"),
+     xlab = "Block-weighted difference in response rates under a new assignment",
+     ylab = "Density")
+segments(statistic, 0, statistic, 1.1 * max(counts$density), col = "#D95926", lwd = 2, lty = 2)
+legend("topleft", bty = "n", pch = c(15, NA), pt.cex = 2, lwd = c(NA, 2), lty = c(NA, 2),
+       col = c("#86B6EF", "#D95926"),
+       legend = c("Draws at most the observed value (counted in the mp p-value)",
+                  paste0("Observed statistic = ", fmt3(statistic))))
+```
+
+**Step 4. The p-value.** For mp it is the share of draws with a statistic at
+most as large as the observed one (a tolerance of 1e-12 keeps exact ties as
+ties); for mn, at least as large.
+
+```{r}
+p_mp_by_hand <- mean(stat_null <= statistic + 1e-12)
+
+set.seed(1)    # same seed: the function makes the same draws in the same order
+p_mp_function <- test_monotone_missingness(Z, Y, assumption = "mp", block = block, nperm = nperm)
+
+c(by_hand = p_mp_by_hand, test_monotone_missingness = p_mp_function$p_value,
+  statistic_by_hand = statistic, statistic_function = p_mp_function$statistic)
+```
+
+With the same seed, the hand calculation and the function make the same draws
+and give the same p-value. Because the statistic and its null distribution are
+computed from the block summaries, the order of the rows in the data does not
+matter (section 8).
+
+### 3.4 Inside `ri_sharp_attrition()`
+
+When `missing = "mp"` or `"mn"` and the design is at the individual level,
+`ri_sharp_attrition()` calls `test_monotone_missingness()` with the same `Z`,
+`Y` and `block` it analyzes, stores the result as `monotone_test`, and prints
+one line in the missingness section. The call is wrapped in `.ri_keep_seed()`,
+which restores the random-number state afterwards, so adding the test does
+not change any other result.
+
+```{r}
+set.seed(20201)
+out <- ri_sharp_attrition(Z = Z, Y = Y, missing = "mp", include_ci = FALSE,
+                          outcome_name = "az_overall_a_w3")
+out$monotone_test$p_value
+printed <- capture.output(print(out))
+printed[grepl("Test of M", printed)]
+```
+
+### 3.5 The full code
+
+::: {.callout-note collapse="true"}
+## Source of `R/4_missingness_tests.R`
+
+```{r, eval=FALSE, file="../R/4_missingness_tests.R"}
+```
+:::
+
+## 4. Check 1: exact p-value, full enumeration, and Fisher's test
+
+A small example with 12 units, 6 treated: we list all `choose(12, 6) = 924`
+assignments, compute the difference in response rates for each, and count how
+often it is at most the observed one.
+
+```{r}
+Z <- c(1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0)
+Y <- c(NA, NA, NA, 2, 5, 1, NA, 3, 4, 2, 6, 1)   # NA = missing outcome
+M <- as.numeric(!is.na(Y))
+
+diff_in_rates <- function(z) mean(M[z == 1]) - mean(M[z == 0])
+observed_diff <- diff_in_rates(Z)
+
+all_treated_sets <- combn(12, 6)
+all_diffs <- apply(all_treated_sets, 2, function(treated) {
+  z <- rep(0, 12)
+  z[treated] <- 1
+  diff_in_rates(z)
+})
+
+fisher_table <- table(factor(Z, levels = c(1, 0)), factor(M, levels = c(1, 0)))
+
+kable(data.frame(
+  Method = c("Full enumeration (924 assignments)", "test_monotone_missingness()",
+             "fisher.test(), one-sided"),
+  `p-value, mp` = fmt4(c(
+    mean(all_diffs <= observed_diff + 1e-12),
+    test_monotone_missingness(Z, Y, assumption = "mp")$p_value,
+    fisher.test(fisher_table, alternative = "less")$p.value
+  )),
+  `p-value, mn` = fmt4(c(
+    mean(all_diffs >= observed_diff - 1e-12),
+    test_monotone_missingness(Z, Y, assumption = "mn")$p_value,
+    fisher.test(fisher_table, alternative = "greater")$p.value
+  )),
+  check.names = FALSE
+), align = c("l", "r", "r"))
+```
+
+The three methods give the same p-values.
+
+## 5. Check 2: comparison with RIQITE's `pval_bound()`
+
+`pval_bound()` approximates the same randomization distribution by Monte
+Carlo, so its p-values differ from ours only by Monte Carlo error. The table
+uses 10,000 replications for `pval_bound()` and reports the Monte Carlo
+standard error of its p-value, sqrt(p (1 - p) / 10,000), with p our exact
+p-value.
+
+```{r}
+chen_contrast <- function(arm_var) {
+  dat <- chen[chen[[arm_var]] == 1 | chen$treatment_control == 1, ]
+  list(Z = dat[[arm_var]], Y = dat$az_overall_a_w3)
+}
+scacco <- zap_labels(read_dta("/Users/yinghuizhou/Library/CloudStorage/Dropbox/Projects/attrition application package/personal/paper/scacco_warren_replication/Data_APSR.dta"))
+
+simulated <- function(n, rate_treat, rate_control, seed) {
+  set.seed(seed)
+  Z <- sample(rep(c(1, 0), each = n / 2))
+  Y <- rnorm(n)
+  observed <- ifelse(Z == 1, runif(n) < rate_treat, runif(n) < rate_control)
+  Y[!observed] <- NA
+  list(Z = Z, Y = Y)
+}
+
+datasets <- list(
+  "Chen and Yang, AE vs C" = chen_contrast("treatment_vpnnl"),
+  "Chen and Yang, A vs C" = chen_contrast("treatment_vpnonly"),
+  "Chen and Yang, CE vs C" = chen_contrast("treatment_nlonly"),
+  "Scacco and Warren, UYVT vs C" = list(Z = scacco$assign_AvB, Y = scacco$prejudice_negative_end),
+  "Simulated, n = 100, 70% vs 85%" = simulated(100, 0.70, 0.85, seed = 1),
+  "Simulated, n = 60, 90% vs 75%" = simulated(60, 0.90, 0.75, seed = 2),
+  "Simulated, n = 400, 80% vs 80%" = simulated(400, 0.80, 0.80, seed = 3)
+)
+
+comparison <- NULL
+for (name in names(datasets)) {
+  Z <- datasets[[name]]$Z
+  M <- as.numeric(!is.na(datasets[[name]]$Y))
+  for (assumption in c("mp", "mn")) {
+    ours <- test_monotone_missingness(Z, datasets[[name]]$Y, assumption = assumption)$p_value
+
+    # mp: H0 tau >= 0, alternative "less"; mn: H0 tau <= 0, alternative "greater".
+    set.seed(2023)
+    theirs <- riqite$pval_bound(Z, M, c = 0, method.list = list(name = "DIM"),
+                                alternative = if (assumption == "mp") "less" else "greater",
+                                nperm = 10^4)
+    mc_se <- sqrt(ours * (1 - ours) / 10^4)
+
+    comparison <- rbind(comparison, data.frame(
+      Data = name,
+      Assumption = assumption,
+      `Ours (exact)` = fmt4(ours),
+      `RIQITE pval_bound()` = fmt4(theirs),
+      Difference = fmt4(theirs - ours),
+      `MC standard error` = fmt4(mc_se),
+      `Within 3 SE` = if (abs(theirs - ours) <= 3 * mc_se + 1e-12) "yes" else "NO",
+      check.names = FALSE
+    ))
+  }
+}
+kable(comparison, align = c("l", "l", "r", "r", "r", "r", "c"))
+```
+
+```{r}
+# For c = 0, the two imputation choices of pval_bound() ("control" and "both")
+# use the same outcomes, so with the same random draws they agree exactly.
+d <- datasets[["Simulated, n = 100, 70% vs 85%"]]
+M <- as.numeric(!is.na(d$Y))
+set.seed(5)
+p_control <- riqite$pval_bound(d$Z, M, alternative = "less", nperm = 10^4, impute = "control")
+set.seed(5)
+p_both <- riqite$pval_bound(d$Z, M, alternative = "less", nperm = 10^4, impute = "both")
+c(impute_control = p_control, impute_both = p_both)
+```
+
+All differences between our exact p-values and RIQITE's Monte Carlo p-values
+are within Monte Carlo error (see the last column). With binary M under
+complete randomization, our function returns the value that `pval_bound()`
+approximates.
+
+## 6. Check 3: type I error over every population that satisfies mp
+
+A p-value is valid for mp if, for **every** population with no harmed units,
+Pr(p <= alpha) <= alpha. We can compute this probability exactly. For a
+population with given numbers of always-observed, never-observed, helped and
+harmed units, the numbers of treated units of each type follow a multivariate
+hypergeometric distribution; for each possible split we know the observed data
+and hence the p-value.
+
+```{r}
+# Exact probability that the mp test rejects at level alpha, over all ways of
+# assigning m of the n units to treatment.
+rejection_prob_mp <- function(n_always, n_never, n_helped, n_harmed, m, alpha = 0.05) {
+  n <- n_always + n_never + n_helped + n_harmed
+  # a, h, v = numbers of treated always-observed, helped and harmed units.
+  splits <- expand.grid(a = 0:min(n_always, m), h = 0:min(n_helped, m), v = 0:min(n_harmed, m))
+  splits$k <- m - splits$a - splits$h - splits$v       # treated never-observed units
+  splits <- splits[splits$k >= 0 & splits$k <= n_never, ]
+
+  prob <- exp(lchoose(n_always, splits$a) + lchoose(n_helped, splits$h) +
+                lchoose(n_harmed, splits$v) + lchoose(n_never, splits$k) - lchoose(n, m))
+  treated_observed <- splits$a + splits$h              # always-observed and helped
+  n_observed <- n_always + splits$h + (n_harmed - splits$v)
+  p_value <- phyper(treated_observed, n_observed, n - n_observed, m)
+  sum(prob[p_value <= alpha + 1e-12])
+}
+```
+
+The formula for `p_value` is the one used by `test_monotone_missingness()`,
+checked in section 4. We go through every population of n = 40 units (20
+treated) with no harmed units: all ways to split 40 units into
+always-observed, never-observed and helped units.
+
+```{r}
+n <- 40
+m <- 20
+populations <- expand.grid(n_always = 0:n, n_helped = 0:n)
+populations <- populations[populations$n_always + populations$n_helped <= n, ]
+populations$n_never <- n - populations$n_always - populations$n_helped
+
+for (alpha in c(0.01, 0.05, 0.10)) {
+  populations[[paste0("alpha_", alpha)]] <- mapply(
+    rejection_prob_mp, populations$n_always, populations$n_never, populations$n_helped,
+    MoreArgs = list(n_harmed = 0, m = m, alpha = alpha)
+  )
+}
+
+worst <- sapply(c(0.01, 0.05, 0.10), function(alpha) {
+  column <- populations[[paste0("alpha_", alpha)]]
+  c(alpha = alpha, max_rejection = max(column),
+    helped_in_worst = populations$n_helped[which.max(column)])
+})
+kable(data.frame(
+  `Nominal level` = worst["alpha", ],
+  `Largest rejection probability` = fmt4(worst["max_rejection", ]),
+  `Helped units in the worst population` = worst["helped_in_worst", ],
+  check.names = FALSE
+), caption = paste0("All ", nrow(populations), " populations of 40 units with no harmed units."))
+```
+
+Over all `r nrow(populations)` populations, the rejection probability never
+exceeds the nominal level, and the worst case is a population with no helped
+units, that is, no effect on missingness at all. As the theory says, "no
+effect" is the least favorable case. (The largest rejection probability is
+below the nominal level because the exact test is discrete.)
+
+```{r, fig.width=8, fig.height=4.5}
+# How the rejection probability falls as helped units are added (alpha = 0.05),
+# for populations with 10 never-observed units.
+path <- populations[populations$n_never == 10, ]
+path <- path[order(path$n_helped), ]
+par(mar = c(4.5, 4.5, 1, 1), las = 1)
+plot(path$n_helped, path$alpha_0.05, type = "b", pch = 16, col = "#2A78D6",
+     ylim = c(0, 0.06), xlab = "Number of helped units (out of 40)",
+     ylab = "Rejection probability")
+abline(h = 0.05, lty = 2, col = "#898781")
+text(max(path$n_helped), 0.05, "nominal level 0.05", pos = 1, cex = 0.8, col = "#52514E")
+```
+
+## 7. Check 4: what the test can and cannot detect
+
+Now add harmed units, which violate mp. A larger population (200 units, 100
+treated, 20 never observed) shows two cases:
+
+- **only harmed units**: the rest are always observed;
+- **harmed units offset by the same number of helped units**: the net effect on
+  the response rate is zero.
+
+```{r}
+n_harmed_grid <- 0:30
+power_only_harmed <- sapply(n_harmed_grid, function(v) {
+  rejection_prob_mp(n_always = 180 - v, n_never = 20, n_helped = 0, n_harmed = v, m = 100)
+})
+power_offset <- sapply(n_harmed_grid, function(v) {
+  rejection_prob_mp(n_always = 180 - 2 * v, n_never = 20, n_helped = v, n_harmed = v, m = 100)
+})
+```
+
+```{r, fig.width=8, fig.height=4.5}
+par(mar = c(4.5, 4.5, 1, 1), las = 1)
+plot(n_harmed_grid, power_only_harmed, type = "l", lwd = 2, col = "#2A78D6", ylim = c(0, 1),
+     xlab = "Number of harmed units (out of 200), i.e. units that violate mp",
+     ylab = "Probability that the test rejects mp")
+lines(n_harmed_grid, power_offset, lwd = 2, col = "#EB6834")
+abline(h = 0.05, lty = 2, col = "#898781")
+legend("topleft", bty = "n", lwd = 2, col = c("#2A78D6", "#EB6834"),
+       legend = c("Only harmed units", "Harmed units offset by helped units"))
+```
+
+```{r}
+kable(data.frame(
+  `Harmed units` = c(5, 10, 20, 30),
+  `Rejection probability, only harmed` = fmt3(power_only_harmed[c(5, 10, 20, 30) + 1]),
+  `Rejection probability, offset by helped` = fmt3(power_offset[c(5, 10, 20, 30) + 1]),
+  check.names = FALSE
+), align = c("r", "r", "r"))
+```
+
+- When harmed units are not offset, the test detects them once they are a
+  sizable share of the sample.
+- When the same number of helped units offsets them, the test **never**
+  detects the violation: its rejection probability stays at or below 0.05 even
+  with 30 of 200 units violating mp. The test only sees the net difference in
+  response rates.
+
+So a small p-value is evidence against mp, but a large p-value does not show
+that mp holds.
+
+## 8. Check 5: blocked designs
+
+RIQITE's `pval_bound()` assumes complete randomization, so the blocked version
+cannot be compared with it directly. We check it in three other ways.
+
+**(a) Full enumeration in a small example.** Two blocks of 4 and 6 units:
+
+```{r}
+block <- c(rep("a", 4), rep("b", 6))
+Z <- c(1, 1, 0, 0, 1, 1, 1, 0, 0, 0)
+Y <- c(NA, 1, 1, 1, NA, NA, 1, 1, 1, NA)
+M <- as.numeric(!is.na(Y))
+
+weighted_diff <- function(z) {
+  diff_a <- mean(M[1:4][z[1:4] == 1]) - mean(M[1:4][z[1:4] == 0])
+  diff_b <- mean(M[5:10][z[5:10] == 1]) - mean(M[5:10][z[5:10] == 0])
+  (4 * diff_a + 6 * diff_b) / 10
+}
+sets_a <- combn(4, 2)   # 6 ways to treat 2 of the 4 units in block a
+sets_b <- combn(6, 3)   # 20 ways to treat 3 of the 6 units in block b
+all_diffs <- c()
+for (i in seq_len(ncol(sets_a))) {
+  for (j in seq_len(ncol(sets_b))) {
+    z <- rep(0, 10)
+    z[sets_a[, i]] <- 1
+    z[4 + sets_b[, j]] <- 1
+    all_diffs <- c(all_diffs, weighted_diff(z))
+  }
+}
+
+set.seed(10)
+mc <- test_monotone_missingness(Z, Y, assumption = "mp", block = block, nperm = 10^5)
+c(full_enumeration = mean(all_diffs <= weighted_diff(Z) + 1e-12), monte_carlo = mc$p_value)
+```
+
+**(b) The row order does not matter.** Chen and Yang, AE vs. control, with the
+strata university x gender x cohort; same seed, rows in four orders:
+
+```{r}
+p_for_order <- function(dat) {
+  set.seed(1)
+  test_monotone_missingness(dat$treatment_vpnnl, dat$az_overall_a_w3, "mp", block = dat$stratum)$p_value
+}
+set.seed(7)
+random_order <- sample(nrow(ae))
+c(original = p_for_order(ae), sorted = p_for_order(ae[order(ae$stratum), ]),
+  random = p_for_order(ae[random_order, ]),
+  reversed = p_for_order(ae[order(ae$stratum, decreasing = TRUE), ]))
+```
+
+**(c) Type I error by simulation.** Six blocks that differ in size, treated
+share and response rate, with different numbers of helped units (mp holds). We
+draw 2,000 blocked assignments, compute the p-value for each (2,000 Monte
+Carlo replications each), and record how often p <= 0.05.
+
+```{r}
+# Each block: size, number treated, always-observed, helped; the rest never observed.
+blocks <- data.frame(
+  size = c(20, 30, 40, 50, 60, 80),
+  treated = c(6, 15, 28, 20, 30, 56),
+  always = c(10, 24, 20, 40, 30, 70),
+  helped = c(5, 0, 12, 4, 20, 2)
+)
+
+simulate_rejection <- function(blocks, n_sim = 2000, alpha = 0.05) {
+  # Potential missingness indicators for every unit.
+  block_id <- rep(seq_len(nrow(blocks)), blocks$size)
+  M0 <- M1 <- c()
+  for (b in seq_len(nrow(blocks))) {
+    never <- blocks$size[b] - blocks$always[b] - blocks$helped[b]
+    M0 <- c(M0, rep(1, blocks$always[b]), rep(0, blocks$helped[b]), rep(0, never))
+    M1 <- c(M1, rep(1, blocks$always[b]), rep(1, blocks$helped[b]), rep(0, never))
+  }
+  reject <- logical(n_sim)
+  for (s in seq_len(n_sim)) {
+    Z <- numeric(length(block_id))
+    for (b in seq_len(nrow(blocks))) {
+      units <- which(block_id == b)
+      Z[units[sample(length(units), blocks$treated[b])]] <- 1
+    }
+    Y <- ifelse(Z == 1, M1, M0)       # Y is only used to mark missing outcomes
+    Y[Y == 0] <- NA
+    p <- test_monotone_missingness(Z, Y, assumption = "mp", block = block_id, nperm = 2000)$p_value
+    reject[s] <- p <= alpha
+  }
+  mean(reject)
+}
+
+set.seed(2026)
+rate_helped <- simulate_rejection(blocks)
+no_helped <- blocks
+no_helped$helped <- 0
+set.seed(2027)
+rate_sharp <- simulate_rejection(no_helped)
+
+kable(data.frame(
+  Population = c("mp holds, with helped units", "No effect on missingness (no helped units)"),
+  `Rejection rate at 0.05` = fmt3(c(rate_helped, rate_sharp)),
+  `Simulation standard error` = fmt3(sqrt(0.05 * 0.95 / 2000)),
+  check.names = FALSE
+), align = c("l", "r", "r"))
+```
+
+The rejection rates are at or below 0.05 (within simulation error). This
+supports the blocked version, but it is evidence from simulation, not a proof;
+the theory for the block-weighted statistic should still be confirmed.
+
+## 9. Summary
+
+| Check | Result |
+|:--|:--|
+| Exact p-value vs. full enumeration and `fisher.test()` | identical |
+| vs. RIQITE `pval_bound()` (difference in means, c = 0) | equal up to Monte Carlo error in all cases |
+| Type I error over all 40-unit populations satisfying mp | never above the nominal level; worst case = no effect |
+| Power when mp fails | detects unbalanced violations; cannot detect violations offset by helped units |
+| Blocked version | matches full enumeration; does not depend on row order; type I error at or below 0.05 in simulation |
+
+Notes on RIQITE's code (commit b45b820), for reference:
+
+- `pval_bound()` stores an n x nperm matrix of assignments; with its default
+  `nperm = 10^5` this needs about 670 MB for n = 835. Our exact formula avoids
+  Monte Carlo under complete randomization.
+- In `test_stat()` in `RI_bound_20220919.R`, the Wilcoxon branch uses `n`
+  before defining it. This does not affect the difference-in-means statistic
+  used here.

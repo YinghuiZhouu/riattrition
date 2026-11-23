@@ -102,6 +102,21 @@ ri_sharp_attrition <- function(Z, Y, c = 0, missing = "general", class = "RS",
   Y.analysis <- analysis_data$Y
   block.analysis <- analysis_data$block
 
+  # Put the units in a random order before any ranking. Ties are broken by
+  # position (ties.method = "first"), and Li, Sheng & Yu (2025, Section 4.2.2)
+  # assume the units were randomly ordered before the analysis, so positions
+  # must not depend on the treatment (as in application_wrapper()). The results
+  # do not depend on the order of the units, so nothing is put back afterwards.
+  new_order <- .ri_random_order(length(Z.analysis))
+  Z.analysis <- Z.analysis[new_order]
+  Y.analysis <- Y.analysis[new_order]
+  if (!is.null(block.analysis)) {
+    block.analysis <- block.analysis[new_order]
+  }
+  if (!is.null(Z.perm)) {
+    Z.perm <- Z.perm[new_order, , drop = FALSE]   # rows follow the units
+  }
+
   assumptions_reported <- unique(c("general", missing))
   counts <- .ri_missing_counts(Z.analysis, Y.analysis)
   block_diagnostics <- .ri_block_diagnostics(Z = Z.analysis, Y = Y.analysis, block = block.analysis)
@@ -220,6 +235,18 @@ ri_sharp_attrition <- function(Z, Y, c = 0, missing = "general", class = "RS",
 
   results <- do.call(rbind, results_list)
 
+  # Test of the monotone missingness assumption, when mp or mn is used (not for
+  # cluster designs). test_monotone_missingness() is in R/4_missingness_tests.R.
+  # .ri_keep_seed() restores the random-number state afterwards, so adding this
+  # test does not change any other result.
+  monotone_test <- NULL
+  if (missing %in% c("mp", "mn") && identical(analysis_data$inference_unit, "individual")) {
+    monotone_test <- .ri_keep_seed(test_monotone_missingness(
+      Z = Z.analysis, Y = Y.analysis, assumption = missing,
+      block = block.analysis, nperm = nperm
+    ))
+  }
+
   # Return a richer S3 object than the original scalar p-value interface.  The
   # actual inferential content is unchanged; we are just storing enough metadata
   # to print something that applied users can immediately interpret.
@@ -242,6 +269,7 @@ ri_sharp_attrition <- function(Z, Y, c = 0, missing = "general", class = "RS",
       block_diagnostics = block_diagnostics,
       block_missing_sum = block_missing_sum,
       assumption_hint = .ri_assumption_hint(counts, block_diagnostics),
+      monotone_test = monotone_test,
       results = results,
       confidence_level = 1 - alpha,
       beta = beta,
@@ -603,6 +631,31 @@ ri_test <- ri_sharp_attrition
   .ri_assign_blocked(Z = Z.obs, block = block[M == 1], nperm = nperm)
 }
 
+#----------- New helper: share of the null distribution at or above a value ---#
+#
+# Rank-sum statistics take discrete values, so many Monte Carlo draws can equal
+# the observed statistic exactly. Sums computed in a different order can differ
+# in the last decimal places, so the comparison allows a tiny tolerance (the
+# same as RIQITE's pval_from_null()).
+.ri_upper_tail_share <- function(stat.null, stat.obs) {
+  mean(stat.null >= stat.obs - 1e-9 * max(1, abs(stat.obs)))
+}
+
+#----------- New helper: random order of the units ---------------------------#
+#
+# Returns a random order of 1, ..., n. It is drawn from its own random-number
+# stream and the original random-number state is restored afterwards, so the
+# Monte Carlo draws that follow are the same as without the shuffle.
+.ri_random_order <- function(n) {
+  if (!exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
+    stats::runif(1)   # creates the random-number state if there is none yet
+  }
+  old_seed <- get(".Random.seed", envir = globalenv())
+  on.exit(assign(".Random.seed", old_seed, envir = globalenv()))
+  set.seed(sample.int(.Machine$integer.max, 1))
+  sample.int(n)
+}
+
 #----------- New helper: blocked permutation matrix --------------------------#
 #
 # This function has no analogue in the original complete-randomization code.
@@ -761,7 +814,7 @@ ri_test <- ri_sharp_attrition
 
     # test_stat() is also imported from 0_function_sharp_null.R.
     stat.obs <- test_stat(Z = Z, Y = Y0.com.imp, class = class, method.list = method.list)
-    p.value <- mean(stat.null >= stat.obs)
+    p.value <- .ri_upper_tail_share(stat.null, stat.obs)
 
     return(list(
       stat_obs = stat.obs,
@@ -782,7 +835,7 @@ ri_test <- ri_sharp_attrition
   }
 
   stat.obs <- test_stat(Z = Z.obs, Y = Y0.imp.obs, class = class, method.list = method.list)
-  p.value <- mean(stat.null >= stat.obs)
+  p.value <- .ri_upper_tail_share(stat.null, stat.obs)
 
   list(
     stat_obs = stat.obs,
@@ -1364,6 +1417,13 @@ print.riattrition_result <- function(x, ...) {
       cat(.ri_pad_right("IQR:", label_width), .ri_pad_left(iqr, 24), "\n", sep = "")
       cat(.ri_pad_right("Range:", label_width), .ri_pad_left(range, 24), "\n", sep = "")
     }
+  }
+
+  # Test of the monotone missingness assumption (mp or mn only).
+  mt <- x$monotone_test
+  if (!is.null(mt)) {
+    p_text <- if (mt$p_value < 0.001) "p < 0.001" else paste0("p = ", .ri_pvalue(mt$p_value))
+    cat("\nTest of ", mt$hypothesis, ": ", p_text, " (", mt$method, ")\n", sep = "")
   }
 
   # Cluster designs are not redesigned yet: their summary is printed as before.

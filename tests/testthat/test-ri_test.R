@@ -409,6 +409,10 @@ test_that("plot_ri_test_stat() returns visualization data aligned with ri_sharp_
   expect_equal(viz$obs_position, "inside")
   expect_equal(viz$mc_replications, 200)
   expect_true(grepl("MC replications = 200", viz$subtitle[[2]], fixed = TRUE))
+  # The figure names the observed statistic and its value in full.
+  expect_true(startsWith(viz$subtitle[[1]], paste0("Observed statistic = ", .ri_format_num(viz$stat_obs))))
+  expect_true(grepl("p-value", viz$subtitle[[1]], fixed = TRUE))
+  expect_true(startsWith(viz$subtitle[[2]], "Complete randomization"))
 })
 
 test_that("the header states the outcome, design, test and sharp null", {
@@ -696,4 +700,26 @@ test_that("plot_ri_test_stat() restricts non-general assumptions in general mode
     ),
     "`missing` should match the requested analysis"
   )
+})
+
+test_that("units are put in a random order before ranking", {
+  # .ri_random_order() returns a permutation and leaves the random-number state unchanged.
+  set.seed(3)
+  new_order <- .ri_random_order(10)
+  after <- runif(1)
+  set.seed(3)
+  expect_equal(sort(new_order), 1:10)
+  expect_equal(after, runif(1))
+
+  # Without ties between the two arms, the order of the rows does not matter.
+  set.seed(4)
+  Z <- rep(c(1, 0), each = 30)
+  Y <- rnorm(60) + 0.5 * Z
+  Y[c(1:5, 31:40)] <- NA
+  p_for_order <- function(o) {
+    set.seed(9)
+    ri_sharp_attrition(Z = Z[o], Y = Y[o], missing = "general", nperm = 500,
+                       include_ci = FALSE)$results$`P-value`
+  }
+  expect_equal(p_for_order(1:60), p_for_order(60:1))
 })

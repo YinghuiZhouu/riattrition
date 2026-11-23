@@ -21,6 +21,14 @@
 #' missingness procedures as well as an observed-only `complete-case`
 #' visualization mode.
 #'
+#' The figure shows, from top to bottom: the title, the missingness
+#' assumption, a legend (right-tail area and kernel density), the null
+#' distribution with the observed statistic as a dashed line labeled
+#' "Observed statistic = ...", the name of the test statistic on the x-axis, a
+#' line with the observed statistic and the p-value, and a line with the design
+#' and the number of MC replications. A footnote is added only when the
+#' observed statistic lies outside the null distribution.
+#'
 #' @param Z Treatment assignment (\eqn{n \times 1} vector).
 #' @param Y Observed outcome (\eqn{n \times 1} vector, including `NA`s).
 #' @param c A scalar that specifies the sharp null hypothesis.
@@ -61,8 +69,10 @@
 #'   observed statistic. `"split"` uses a split-axis display so that the
 #'   observed statistic remains visible without compressing the null
 #'   distribution.
-#' @param main Optional main title. If `NULL`, the function supplies a default.
-#' @param xlab Optional x-axis label.
+#' @param main Optional main title. If `NULL`, the title is "Upper-tail
+#'   randomization test". The missingness assumption is always shown below it.
+#' @param xlab Optional x-axis label. By default the name of the test statistic,
+#'   e.g. "Wilcoxon rank-sum statistic".
 #' @param ylab Optional y-axis label.
 #' @param null_col Fill color for the main null distribution.
 #' @param tail_col Fill color for the right-tail region used in the p-value.
@@ -91,10 +101,10 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
                               main = NULL,
                               xlab = NULL,
                               ylab = NULL,
-                              null_col = "#D7DDE3",
-                              tail_col = "#C9B8B4",
-                              density_col = "#3E5F7E",
-                              stat_col = "#8F3B3B",
+                              null_col = "#DFDED8",
+                              tail_col = "#86B6EF",
+                              density_col = "#3D3C38",
+                              stat_col = "#D95926",
                               border = "white",
                               lwd = 2,
                               ...) {
@@ -143,6 +153,14 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
   Z.analysis <- analysis_data$Z
   Y.analysis <- analysis_data$Y
   block.analysis <- analysis_data$block
+
+  # Random order of the units before ranking, as in ri_sharp_attrition().
+  new_order <- .ri_random_order(length(Z.analysis))
+  Z.analysis <- Z.analysis[new_order]
+  Y.analysis <- Y.analysis[new_order]
+  if (!is.null(block.analysis)) {
+    block.analysis <- block.analysis[new_order]
+  }
   counts <- .ri_missing_counts(Z.analysis, Y.analysis)
   test_name <- .ri_test_label(class = class, method.list = method.list)
   if (analysis %in% c("general", "mp", "mn")) {
@@ -205,6 +223,26 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
 #
 # The plot highlights the right tail because the package's sharp-null p-values
 # are computed as Pr(T_null >= T_obs).
+#
+# Layout, from top to bottom:
+#   title     "Upper-tail randomization test" (or `main`)
+#   subtitle  the missingness assumption, e.g. "Monotone positive missingness"
+#   legend    right-tail area and kernel density
+#   plot      the null distribution; the dashed line is labeled
+#             "Observed statistic = ..."
+#   x-axis    e.g. "Wilcoxon rank-sum statistic"
+#   line 1    "Observed statistic = ... | p-value = ..."
+#   line 2    "Complete randomization | MC replications = 10,000"
+#   footnote  only when the observed statistic lies outside the null
+#             distribution (how the x-axis was extended or split)
+
+# Text colors: primary, secondary and muted ink.
+.ri_ink <- c(primary = "#0B0B0B", secondary = "#52514E", muted = "#898781")
+
+.ri_capitalize <- function(s) {
+  paste0(toupper(substr(s, 1, 1)), substr(s, 2, nchar(s)))
+}
+
 .ri_draw_null_distribution <- function(x, style, bins, show_density, main,
                                        off_support,
                                        xlab, ylab, null_col, tail_col,
@@ -224,36 +262,44 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
     off_support = off_support
   )
 
+  # Text around the plot.
   if (is.null(main)) {
-    main <- paste("Null distribution under", x$mode_label)
+    main <- "Upper-tail randomization test"
   }
   if (is.null(xlab)) {
-    xlab <- x$test_name
+    xlab <- paste(x$test_name, "statistic")
   }
   if (is.null(ylab)) {
-    ylab <- if (identical(style, "histogram")) "Density" else "Density"
+    ylab <- "Density"
   }
-
-  subtitle_line_1 <- paste0(
-    "Obs = ", .ri_format_num(x$stat_obs),
-    " | p = ", .ri_format_num(x$p_value)
+  text <- list(
+    main = main,
+    assumption = .ri_capitalize(x$mode_label),
+    xlab = xlab,
+    ylab = ylab,
+    obs = paste0("Observed statistic = ", .ri_format_num(x$stat_obs)),
+    line_1 = paste0(
+      "Observed statistic = ", .ri_format_num(x$stat_obs), "  |  ",
+      if (x$p_value < 0.001) "p-value < 0.001" else paste0("p-value = ", .ri_pvalue(x$p_value))
+    ),
+    line_2 = paste0(
+      .ri_capitalize(x$design),
+      "  |  MC replications = ", .ri_format_count(x$mc_replications)
+    )
   )
-  subtitle_line_2 <- paste0(
-    x$design,
-    " | MC replications = ", .ri_format_count(x$mc_replications)
-  )
 
-  tail_note <- if (identical(off_support_mode, "split")) {
-    "The x-axis is split so the observed statistic and the null support remain simultaneously visible."
+  off_support_note <- if (identical(off_support_mode, "split")) {
+    "The x-axis is split so that the observed statistic and the null distribution are both visible."
   } else if (identical(off_support_mode, "extend")) {
-    "The x-axis is extended to include the observed statistic outside the null support."
+    "The x-axis is extended to include the observed statistic, which lies outside the null distribution."
   } else if (identical(obs_position, "left")) {
-    "Observed statistic is left of null support; the entire histogram is in the right tail."
+    "The observed statistic is left of the null distribution; all MC replications are in the right tail."
   } else if (identical(obs_position, "right")) {
-    "Observed statistic is right of null support; no MC replications fall in the right tail."
+    "The observed statistic is right of the null distribution; no MC replication is in the right tail."
   } else {
-    "Right-tail region is shaded; the p-value is the share of MC replications at least as large as the observed statistic."
+    NULL
   }
+  text$footnote <- off_support_note
 
   plot_data <- .ri_build_plot_data(
     stat_null = x$stat_null,
@@ -262,56 +308,27 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
     bins = bins,
     show_density = show_density
   )
+  colors <- list(null = null_col, tail = tail_col, density = density_col,
+                 stat = stat_col, border = border)
 
   if (identical(off_support_mode, "split")) {
-    .ri_draw_split_distribution(
-      plot_data = plot_data,
-      x = x,
-      main = main,
-      xlab = xlab,
-      ylab = ylab,
-      null_col = null_col,
-      tail_col = tail_col,
-      density_col = density_col,
-      stat_col = stat_col,
-      border = border,
-      lwd = lwd,
-      subtitle_line_1 = subtitle_line_1,
-      subtitle_line_2 = subtitle_line_2,
-      tail_note = tail_note,
-      ...
-    )
+    .ri_draw_split_distribution(plot_data = plot_data, x = x, text = text,
+                                colors = colors, lwd = lwd, ...)
   } else {
     xlim <- .ri_main_xlim(
       stat_obs = x$stat_obs,
       stat_null = x$stat_null,
       off_support_mode = off_support_mode
     )
-    .ri_draw_single_distribution(
-      plot_data = plot_data,
-      x = x,
-      xlim = xlim,
-      main = main,
-      xlab = xlab,
-      ylab = ylab,
-      null_col = null_col,
-      tail_col = tail_col,
-      density_col = density_col,
-      stat_col = stat_col,
-      border = border,
-      lwd = lwd,
-      subtitle_line_1 = subtitle_line_1,
-      subtitle_line_2 = subtitle_line_2,
-      tail_note = tail_note,
-      obs_position = obs_position,
-      ...
-    )
+    .ri_draw_single_distribution(plot_data = plot_data, x = x, xlim = xlim,
+                                 text = text, colors = colors, lwd = lwd,
+                                 obs_position = obs_position, ...)
   }
 
   invisible(list(
     off_support_mode = off_support_mode,
     obs_position = obs_position,
-    subtitle = c(subtitle_line_1, subtitle_line_2)
+    subtitle = c(text$line_1, text$line_2)
   ))
 }
 
@@ -372,214 +389,184 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
   c(full_range[1] - full_pad, full_range[2] + full_pad)
 }
 
-.ri_draw_single_distribution <- function(plot_data, x, xlim, main, xlab, ylab,
-                                         null_col, tail_col, density_col,
-                                         stat_col, border, lwd,
-                                         subtitle_line_1, subtitle_line_2,
-                                         tail_note, obs_position, ...) {
-  old_par <- graphics::par(no.readonly = TRUE)
-  on.exit(graphics::par(old_par), add = TRUE)
-  graphics::par(mar = c(7.2, 4.4, 4.2, 1.2))
-
+# Draws the null distribution (histogram or density) with the right tail
+# shaded, plus the x- and y-axes. Used by both the single and the split layout.
+.ri_draw_null_shape <- function(plot_data, stat_obs, xlim, ylim, colors, y_axis = TRUE, ...) {
   if (identical(plot_data$style, "histogram")) {
-    fill_cols <- rep(null_col, length(plot_data$hist_obj$counts))
-    fill_cols[plot_data$hist_obj$mids >= x$stat_obs] <- tail_col
-
+    # Bars at or above the observed statistic form the right tail.
+    fill_cols <- ifelse(plot_data$hist_obj$mids >= stat_obs, colors$tail, colors$null)
     graphics::plot(
-      plot_data$hist_obj,
-      freq = FALSE,
-      col = fill_cols,
-      border = border,
-      main = main,
-      sub = "",
-      xlab = "",
-      ylab = ylab,
-      xlim = xlim,
-      ylim = c(0, plot_data$y_max * 1.05),
-      ...
+      plot_data$hist_obj, freq = FALSE, col = fill_cols, border = colors$border,
+      main = "", xlab = "", ylab = "", xlim = xlim, ylim = ylim, axes = FALSE, ...
     )
-
     if (!is.null(plot_data$dens)) {
-      graphics::lines(plot_data$dens, col = density_col, lwd = 2.5)
+      graphics::lines(plot_data$dens, col = colors$density, lwd = 2)
     }
   } else {
+    dens <- plot_data$dens
     graphics::plot(
-      plot_data$dens,
-      type = "n",
-      main = main,
-      sub = "",
-      xlab = "",
-      ylab = ylab,
-      xlim = xlim,
-      ylim = c(0, plot_data$y_max * 1.05),
-      ...
+      dens, type = "n", main = "", xlab = "", ylab = "", xlim = xlim, ylim = ylim,
+      axes = FALSE, ...
     )
-
-    graphics::polygon(
-      x = c(plot_data$dens$x, rev(plot_data$dens$x)),
-      y = c(plot_data$dens$y, rep(0, length(plot_data$dens$y))),
-      col = null_col,
-      border = NA
-    )
-
-    tail_idx <- plot_data$dens$x >= x$stat_obs
-    if (any(tail_idx)) {
-      graphics::polygon(
-        x = c(x$stat_obs, plot_data$dens$x[tail_idx], max(plot_data$dens$x[tail_idx])),
-        y = c(0, plot_data$dens$y[tail_idx], 0),
-        col = tail_col,
-        border = NA
-      )
+    graphics::polygon(c(dens$x, rev(dens$x)), c(dens$y, rep(0, length(dens$y))),
+                      col = colors$null, border = NA)
+    tail <- dens$x >= stat_obs
+    if (any(tail)) {
+      graphics::polygon(c(stat_obs, dens$x[tail], max(dens$x[tail])), c(0, dens$y[tail], 0),
+                        col = colors$tail, border = NA)
     }
-
-    graphics::lines(plot_data$dens, col = density_col, lwd = 2)
+    graphics::lines(dens, col = colors$density, lwd = 2)
   }
-
-  usr <- graphics::par("usr")
-  y_top <- usr[4]
-
-  if (identical(obs_position, "inside") || identical(x$stat_obs >= usr[1] && x$stat_obs <= usr[2], TRUE)) {
-    graphics::abline(v = x$stat_obs, col = stat_col, lwd = lwd, lty = 2)
-  } else if (identical(obs_position, "left")) {
-    x_left <- usr[1]
-    x_pad <- 0.04 * diff(usr[1:2])
-    graphics::segments(x_left, 0, x_left, 0.93 * y_top, col = stat_col, lwd = lwd, lty = 2, xpd = NA)
-    graphics::arrows(x_left, 0.93 * y_top, x_left - x_pad, 0.93 * y_top,
-                     length = 0.08, code = 2, col = stat_col, lwd = lwd, xpd = NA)
-  } else if (identical(obs_position, "right")) {
-    x_right <- usr[2]
-    x_pad <- 0.04 * diff(usr[1:2])
-    graphics::segments(x_right, 0, x_right, 0.93 * y_top, col = stat_col, lwd = lwd, lty = 2, xpd = NA)
-    graphics::arrows(x_right, 0.93 * y_top, x_right + x_pad, 0.93 * y_top,
-                     length = 0.08, code = 2, col = stat_col, lwd = lwd, xpd = NA)
+  graphics::axis(1)
+  if (y_axis) {
+    graphics::axis(2)
   }
-
-  graphics::mtext(xlab, side = 1, line = 2.0, cex = 1)
-  graphics::mtext(subtitle_line_1, side = 1, line = 3.8, cex = 0.9)
-  graphics::mtext(subtitle_line_2, side = 1, line = 5.0, cex = 0.9)
-  graphics::mtext(tail_note, side = 3, line = 0.2, cex = 0.78)
 }
 
-.ri_draw_split_distribution <- function(plot_data, x, main, xlab, ylab,
-                                        null_col, tail_col, density_col,
-                                        stat_col, border, lwd,
-                                        subtitle_line_1, subtitle_line_2,
-                                        tail_note, ...) {
+# Legend for the shaded right tail and the density curve. `x`, `y` give its
+# top-left corner, or `x` alone gives a position such as "topleft".
+.ri_draw_legend <- function(x, y = NULL, colors, with_density, yjust = 1) {
+  labels <- "Right-tail area     "
+  pch <- 15
+  lty <- NA
+  cols <- colors$tail
+  if (with_density) {
+    labels <- c(labels, "Kernel density")
+    pch <- c(pch, NA)
+    lty <- c(lty, 1)
+    cols <- c(cols, colors$density)
+  }
+  graphics::legend(
+    x = x, y = y, yjust = yjust, legend = labels, pch = pch, pt.cex = 2.2,
+    lty = lty, lwd = 2, col = cols, horiz = TRUE, bty = "n", xpd = NA,
+    cex = 0.85, text.col = .ri_ink[["secondary"]], seg.len = 1.6, x.intersp = 0.7
+  )
+}
+
+# Dashed line at the observed statistic with the label "Observed statistic =
+# ...". When the statistic lies outside the plotted range ("arrow" mode), the
+# line is drawn at the plot edge with an arrow pointing toward it.
+.ri_draw_observed <- function(stat_obs, label, colors, lwd) {
+  usr <- graphics::par("usr")
+  label_y <- usr[3] + 0.93 * (usr[4] - usr[3])
+  inside <- stat_obs >= usr[1] && stat_obs <= usr[2]
+  # Outside the plotted range: draw the line just inside the plot edge.
+  edge_gap <- 0.03 * diff(usr[1:2])
+  x_line <- if (inside) stat_obs else if (stat_obs < usr[1]) usr[1] + edge_gap else usr[2] - edge_gap
+
+  graphics::segments(x_line, 0, x_line, label_y, col = colors$stat, lwd = lwd, lty = 2)
+  if (!inside) {
+    x_edge <- if (stat_obs < usr[1]) usr[1] else usr[2]
+    graphics::arrows(x_line, label_y, x_edge, label_y, length = 0.08, col = colors$stat, lwd = lwd)
+  }
+
+  # Put the label on the side of the line with more room.
+  side <- if (x_line > mean(usr[1:2])) 2 else 4
+  graphics::text(x_line, label_y, labels = label, pos = side, cex = 0.85,
+                 col = .ri_ink[["primary"]], xpd = NA)
+}
+
+# Title, subtitle, axis labels, the two summary lines and the footnote.
+# `outer = TRUE` writes them in the outer margins (split layout); `shift`
+# moves the lines below the plot up by that many lines.
+.ri_draw_text <- function(text, outer = FALSE, shift = 0) {
+  ink <- .ri_ink
+  graphics::mtext(text$main, side = 3, line = 3.6, adj = 0, cex = 1.2, font = 2,
+                  col = ink[["primary"]], outer = outer)
+  graphics::mtext(text$assumption, side = 3, line = 2.3, adj = 0, cex = 0.95,
+                  col = ink[["secondary"]], outer = outer)
+  graphics::mtext(text$xlab, side = 1, line = 2.4 - shift, col = ink[["primary"]], outer = outer)
+  graphics::mtext(text$ylab, side = 2, line = 3.3, las = 0, col = ink[["primary"]], outer = outer)
+  graphics::mtext(text$line_1, side = 1, line = 4.0 - shift, adj = 0, cex = 0.95,
+                  col = ink[["primary"]], outer = outer)
+  graphics::mtext(text$line_2, side = 1, line = 5.1 - shift, adj = 0, cex = 0.85,
+                  col = ink[["secondary"]], outer = outer)
+  for (i in seq_along(text$footnote)) {
+    graphics::mtext(text$footnote[[i]], side = 1, line = 5.2 + 0.95 * i - shift, adj = 0, cex = 0.72,
+                    col = ink[["muted"]], outer = outer)
+  }
+}
+
+.ri_draw_single_distribution <- function(plot_data, x, xlim, text, colors, lwd,
+                                         obs_position, ...) {
+  old_par <- graphics::par(no.readonly = TRUE)
+  on.exit(graphics::par(old_par), add = TRUE)
+  # Margins (in lines): bottom, left, top, right. Axis lines and tick labels
+  # use muted and secondary ink; y-axis tick labels are horizontal.
+  graphics::par(
+    mar = c(6.6 + length(text$footnote), 4.8, 5.4, 1.2),
+    fg = .ri_ink[["muted"]], col.axis = .ri_ink[["secondary"]], las = 1
+  )
+
+  # Leave room above the tallest bar for the observed-statistic label.
+  ylim <- c(0, plot_data$y_max * 1.18)
+
+  .ri_draw_null_shape(plot_data, x$stat_obs, xlim, ylim, colors, ...)
+  .ri_draw_observed(x$stat_obs, text$obs, colors, lwd)
+
+  usr <- graphics::par("usr")
+  .ri_draw_legend(x = usr[1], y = usr[4], yjust = 0, colors = colors,
+                  with_density = !is.null(plot_data$dens))
+  .ri_draw_text(text)
+}
+
+.ri_draw_split_distribution <- function(plot_data, x, text, colors, lwd, ...) {
   null_range <- range(x$stat_null)
   support_width <- diff(null_range)
   support_width <- ifelse(support_width <= 0, 1, support_width)
   obs_position <- if (x$stat_obs < null_range[1]) "left" else "right"
-  null_pad <- 0.04 * support_width
-  obs_pad <- 0.08 * support_width
-  null_xlim <- c(null_range[1] - null_pad, null_range[2] + null_pad)
-  obs_xlim <- c(x$stat_obs - obs_pad, x$stat_obs + obs_pad)
+  null_xlim <- c(null_range[1] - 0.04 * support_width, null_range[2] + 0.04 * support_width)
+  obs_xlim <- c(x$stat_obs - 0.08 * support_width, x$stat_obs + 0.08 * support_width)
+  ylim <- c(0, plot_data$y_max * 1.18)
 
   old_par <- graphics::par(no.readonly = TRUE)
   on.exit(graphics::par(old_par), add = TRUE)
 
+  # Two panels: the null distribution (wide) and the observed statistic
+  # (narrow), side by side in the order of the x-axis.
   if (identical(obs_position, "left")) {
     graphics::layout(matrix(c(1, 2), nrow = 1), widths = c(1.4, 4.6))
   } else {
     graphics::layout(matrix(c(1, 2), nrow = 1), widths = c(4.6, 1.4))
   }
-  graphics::par(oma = c(6.2, 4.2, 4.2, 1.2), mar = c(3.5, 2.5, 1.5, 0.3))
+  graphics::par(
+    oma = c(4.4 + length(text$footnote), 4.8, 5.4, 1.2), mar = c(2.2, 0.8, 0.5, 0.8),
+    fg = .ri_ink[["muted"]], col.axis = .ri_ink[["secondary"]], las = 1
+  )
 
   draw_obs_panel <- function() {
-    graphics::plot(
-      NA,
-      xlim = obs_xlim,
-      ylim = c(0, plot_data$y_max * 1.05),
-      type = "n",
-      axes = FALSE,
-      xlab = "",
-      ylab = "",
-      ...
-    )
+    graphics::plot(NA, xlim = obs_xlim, ylim = ylim, type = "n", axes = FALSE,
+                   xlab = "", ylab = "", ...)
     graphics::axis(1, at = x$stat_obs, labels = .ri_format_num(x$stat_obs))
+    if (identical(obs_position, "left")) {
+      graphics::axis(2)
+    }
     graphics::box()
-    graphics::segments(x$stat_obs, 0, x$stat_obs, 0.93 * plot_data$y_max,
-                       col = stat_col, lwd = lwd, lty = 2)
-    graphics::text(x$stat_obs, 0.98 * plot_data$y_max, labels = "Observed",
-                   col = stat_col, cex = 0.85, pos = 3, xpd = NA)
+    usr <- graphics::par("usr")
+    graphics::segments(x$stat_obs, 0, x$stat_obs, usr[3] + 0.82 * (usr[4] - usr[3]),
+                       col = colors$stat, lwd = lwd, lty = 2)
+    graphics::text(x$stat_obs, usr[3] + 0.92 * (usr[4] - usr[3]), labels = "Observed\nstatistic",
+                   cex = 0.8, col = .ri_ink[["primary"]])
     .ri_add_break_marks(side = if (identical(obs_position, "left")) "right" else "left")
   }
 
   draw_null_panel <- function() {
-    if (identical(plot_data$style, "histogram")) {
-      fill_cols <- rep(null_col, length(plot_data$hist_obj$counts))
-      fill_cols[plot_data$hist_obj$mids >= x$stat_obs] <- tail_col
-      graphics::plot(
-        plot_data$hist_obj,
-        freq = FALSE,
-        col = fill_cols,
-        border = border,
-        main = "",
-        sub = "",
-        xlab = "",
-        ylab = "",
-        xlim = null_xlim,
-        ylim = c(0, plot_data$y_max * 1.05),
-        axes = FALSE,
-        ...
-      )
-      graphics::axis(1)
-      graphics::axis(2)
-      graphics::box()
-      if (!is.null(plot_data$dens)) {
-        graphics::lines(plot_data$dens, col = density_col, lwd = 2.5)
-      }
-    } else {
-      graphics::plot(
-        plot_data$dens,
-        type = "n",
-        main = "",
-        sub = "",
-        xlab = "",
-        ylab = "",
-        xlim = null_xlim,
-        ylim = c(0, plot_data$y_max * 1.05),
-        axes = FALSE,
-        ...
-      )
-      graphics::polygon(
-        x = c(plot_data$dens$x, rev(plot_data$dens$x)),
-        y = c(plot_data$dens$y, rep(0, length(plot_data$dens$y))),
-        col = null_col,
-        border = NA
-      )
-      tail_idx <- plot_data$dens$x >= x$stat_obs
-      if (any(tail_idx)) {
-        graphics::polygon(
-          x = c(x$stat_obs, plot_data$dens$x[tail_idx], max(plot_data$dens$x[tail_idx])),
-          y = c(0, plot_data$dens$y[tail_idx], 0),
-          col = tail_col,
-          border = NA
-        )
-      }
-      graphics::lines(plot_data$dens, col = density_col, lwd = 2)
-      graphics::axis(1)
-      graphics::axis(2)
-      graphics::box()
-    }
+    .ri_draw_null_shape(plot_data, x$stat_obs, null_xlim, ylim, colors,
+                        y_axis = identical(obs_position, "right"), ...)
+    graphics::box()
+    .ri_draw_legend(x = "topleft", colors = colors, with_density = !is.null(plot_data$dens))
     .ri_add_break_marks(side = if (identical(obs_position, "left")) "left" else "right")
   }
 
   if (identical(obs_position, "left")) {
     draw_obs_panel()
-    graphics::par(mar = c(3.5, 0.8, 1.5, 0.8))
     draw_null_panel()
   } else {
     draw_null_panel()
-    graphics::par(mar = c(3.5, 0.8, 1.5, 0.3))
     draw_obs_panel()
   }
 
-  graphics::mtext(main, side = 3, outer = TRUE, line = 1.1, cex = 1.1)
-  graphics::mtext(xlab, side = 1, outer = TRUE, line = 1.8)
-  graphics::mtext(ylab, side = 2, outer = TRUE, line = 2.5)
-  graphics::mtext(subtitle_line_1, side = 1, outer = TRUE, line = 3.6, cex = 0.9)
-  graphics::mtext(subtitle_line_2, side = 1, outer = TRUE, line = 4.8, cex = 0.9)
-  graphics::mtext(tail_note, side = 3, outer = TRUE, line = -0.2, cex = 0.78)
+  .ri_draw_text(text, outer = TRUE, shift = 2.2)
 }
 
 .ri_add_break_marks <- function(side = c("left", "right")) {

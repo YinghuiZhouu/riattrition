@@ -9,7 +9,7 @@ plot_ri_test_stat(
   c = 0,
   missing = "general",
   class = "RS",
-  analysis = c("general", "complete-case"),
+  analysis = c("general", "mp", "mn", "complete-case"),
   method.list = list(name = "Wilcoxon"),
   block = NULL,
   cluster = NULL,
@@ -23,10 +23,10 @@ plot_ri_test_stat(
   main = NULL,
   xlab = NULL,
   ylab = NULL,
-  null_col = "#D7DDE3",
-  tail_col = "#C9B8B4",
-  density_col = "#3E5F7E",
-  stat_col = "#8F3B3B",
+  null_col = "#DFDED8",
+  tail_col = "#86B6EF",
+  density_col = "#3D3C38",
+  stat_col = "#D95926",
   border = "white",
   lwd = 2,
   ...
@@ -86,10 +86,12 @@ toward the off-support value. \code{"extend"} enlarges the x-axis to include
 the observed statistic. \code{"split"} uses a split-axis display so that the
 observed statistic remains visible without compressing the null distribution.}
 
-\item{main}{Optional main title. If \code{NULL}, the function supplies a
-default.}
+\item{main}{Optional main title. If \code{NULL}, the title is
+"Upper-tail randomization test". The missingness assumption is always shown
+below the title.}
 
-\item{xlab}{Optional x-axis label.}
+\item{xlab}{Optional x-axis label. By default the name of the test
+statistic, e.g. "Wilcoxon rank-sum statistic".}
 
 \item{ylab}{Optional y-axis label.}
 
@@ -115,8 +117,19 @@ null distribution, observed statistic, p-value, and plotting metadata.
 \description{
 \code{plot_ri_test_stat()} draws the randomization null distribution, marks the
 observed test statistic, and highlights the right tail that determines the
-sharp-null p-value. It supports the package's general-missingness procedure
-and an observed-only complete-case visualization mode.
+sharp-null p-value. It supports the package's \code{general}, \code{mp}
+and \code{mn} missingness procedures and an observed-only complete-case
+visualization mode.
+
+The figure shows, from top to bottom: the title, the missingness assumption,
+a legend (right-tail area and kernel density), the null distribution with the
+observed statistic as a dashed line labeled "Observed statistic = ...", the
+name of the test statistic on the x-axis, a line with the observed statistic
+and the p-value, and a line with the randomization design and the number of
+Monte Carlo (MC) replications. When the observed statistic lies outside the
+null distribution, the x-axis is extended or split (see \code{off_support}),
+or an arrow at the plot edge points toward it, and a one-line footnote says
+which.
 }
 \examples{
 Z <- c(1, 1, 1, 0, 0, 0)

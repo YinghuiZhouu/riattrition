@@ -132,6 +132,7 @@ source(file.path(package_dir, "R", "0_function_sharp_null.R"))
 source(file.path(package_dir, "R", "0_function_sharp_null_twostep.R"))
 source(file.path(package_dir, "R", "1_result_output.R"))
 source(file.path(package_dir, "R", "2_visualization.R"))
+source(file.path(package_dir, "R", "4_missingness_tests.R"))
 ```
 
 ## Load Replication Data
@@ -343,7 +344,8 @@ secondary (`r fmt_n(covariate_counts$below_secondary)` respondents, including
 ```{r}
 # Missingness regression diagnostics (shared with the other application notes).
 # M = 1 if the outcome is observed, as in Li, Sheng & Yu (2025).
-source(file.path(package_dir, "analysis", "attrition_regressions.R"))
+source(file.path(package_dir, "R", "3_attrition_diagnostics.R"))
+source(file.path(package_dir, "analysis", "prognostic_check.R"))
 
 missingness_regressions <- function(y_var) {
   attrition_regressions(
@@ -1307,7 +1309,7 @@ kable(
 ```
 
 For discernment, the slopes test for differential attrition on the covariates
-gives p = `r fmt3(discernment_pc$attrition$tests$slopes$p)`, and among
+gives p = `r fmt3(with(discernment_pc$attrition$joint_tests, p_value[test == "slopes"]))`, and among
 units with observed outcomes the treated-minus-control difference in predicted
 `Y*(0)` is `r fmt3(discernment_pc$score$respondents$est)`, compared with an
 observed-outcome difference of `r fmt3(discernment_pc$score$observed_y$est)`.
