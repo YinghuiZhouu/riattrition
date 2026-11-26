@@ -6,9 +6,12 @@
 #   * .ri_sharp_details()         from R/1_result_output.R
 #   * null_dist() / test_stat()   from R/0_function_sharp_null.R
 #
-# The function supports two visualization modes:
-#   * analysis = "general": use the package's general-missingness procedure
-#   * analysis = "complete-case": restrict to observed outcomes only
+# The function supports these visualization modes (names as in Li, Sheng & Yu
+# 2025):
+#   * analysis = "general", "mp" or "mn": the package's procedure for general,
+#     monotone positive or monotone negative missingness (all randomized units)
+#   * analysis = "sharp": sharp missingness, M(1) = M(0); the test then uses the
+#     units with observed outcomes only (the paper's Section 6.4)
 #
 # This keeps the plotting layer close to applied practice while still reusing
 # the underlying randomization-inference engine.
@@ -17,9 +20,8 @@
 #'
 #' `plot_ri_test_stat()` draws the randomization null distribution, marks the
 #' observed test statistic, and highlights the right tail that determines the
-#' sharp-null p-value. It supports the package's `general`, `mp`, and `mn`
-#' missingness procedures as well as an observed-only `complete-case`
-#' visualization mode.
+#' sharp-null p-value. It supports the package's `general`, `mp`, `mn` and
+#' `sharp` missingness procedures.
 #'
 #' The figure shows, from top to bottom: the title, the missingness
 #' assumption, a legend (right-tail area and kernel density), the null
@@ -33,17 +35,15 @@
 #' @param Y Observed outcome (\eqn{n \times 1} vector, including `NA`s).
 #' @param c A scalar that specifies the sharp null hypothesis.
 #' @param analysis A string that specifies which inferential path to visualize:
-#'   `"general"`, `"mp"`, and `"mn"` use the corresponding package procedure,
-#'   while `"complete-case"` restricts the analysis to observed outcomes only.
-#' @param missing A string that specifies the missing mechanism. When supplied,
-#'   this should match the requested attrition-aware `analysis`. It is ignored
-#'   when `analysis = "complete-case"`.
+#'   `"general"`, `"mp"` and `"mn"` use all randomized units; `"sharp"`
+#'   (sharp missingness, \eqn{M_i(1) = M_i(0)}: treatment does not change whose
+#'   outcome is observed) uses the units with observed outcomes only.
+#' @param missing A string that specifies the missing mechanism. For
+#'   `"general"`, `"mp"` and `"mn"` it must match `analysis`. It is ignored
+#'   when `analysis = "sharp"`.
 #' @param class A string that specifies the class of test statistic for the
 #'   sharp-null procedure.
 #' @param method.list A list that specifies the choice of test statistic.
-#' @param block An optional block identifier vector. If supplied, permutations
-#'   are generated within blocks while preserving the treated count in each
-#'   block.
 #' @param cluster An optional cluster identifier vector. If supplied, the
 #'   analysis treats clusters as the unit of analysis.
 #' @param cluster_outcome A string that specifies how individual outcomes are
@@ -87,9 +87,8 @@
 #'   the null distribution, observed statistic, p-value, and plotting metadata.
 #' @export
 plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
-                              analysis = c("general", "mp", "mn", "complete-case"),
+                              analysis = c("general", "mp", "mn", "sharp"),
                               method.list = list(name = "Wilcoxon"),
-                              block = NULL,
                               cluster = NULL,
                               cluster_outcome = "mean_observed",
                               cluster_missing = "all_missing",
@@ -118,7 +117,7 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
 
   viz <- .ri_visualization_data(
     Z = Z, Y = Y, c = c, analysis = analysis, missing = missing, class = class,
-    method.list = method.list, block = block, cluster = cluster,
+    method.list = method.list, cluster = cluster,
     cluster_outcome = cluster_outcome, cluster_missing = cluster_missing,
     nperm = nperm
   )
@@ -143,30 +142,25 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
 # This helper computes the same sharp-null ingredients used in the printed
 # wrapper and stores them in a small object that is easy to plot or inspect.
 .ri_visualization_data <- function(Z, Y, c, analysis, missing, class, method.list,
-                                   block, cluster, cluster_outcome,
+                                   cluster, cluster_outcome,
                                    cluster_missing, nperm) {
   analysis_data <- .ri_prepare_analysis_data(
-    Z = Z, Y = Y, block = block, cluster = cluster,
+    Z = Z, Y = Y, cluster = cluster,
     cluster_outcome = cluster_outcome, cluster_missing = cluster_missing
   )
 
   Z.analysis <- analysis_data$Z
   Y.analysis <- analysis_data$Y
-  block.analysis <- analysis_data$block
 
   # Random order of the units before ranking, as in ri_sharp_attrition().
   new_order <- .ri_random_order(length(Z.analysis))
   Z.analysis <- Z.analysis[new_order]
   Y.analysis <- Y.analysis[new_order]
-  if (!is.null(block.analysis)) {
-    block.analysis <- block.analysis[new_order]
-  }
   counts <- .ri_missing_counts(Z.analysis, Y.analysis)
   test_name <- .ri_test_label(class = class, method.list = method.list)
   if (analysis %in% c("general", "mp", "mn")) {
     Z.perm <- .ri_default_assignments(
-      Z = Z.analysis, Y = Y.analysis, missing = analysis,
-      block = block.analysis, nperm = nperm
+      Z = Z.analysis, Y = Y.analysis, missing = analysis, nperm = nperm
     )
     stat.null <- null_dist(
       n = counts$n_total, m = counts$n_treat, class = class,
@@ -184,27 +178,27 @@ plot_ri_test_stat <- function(Z, Y, c = 0, missing = "general", class = "RS",
       mn = "monotone negative missingness"
     )
   } else {
+    # Sharp missingness: only units with observed outcomes enter the test.
     Z.perm <- .ri_default_assignments(
-      Z = Z.analysis, Y = Y.analysis, missing = "random",
-      block = block.analysis, nperm = nperm
+      Z = Z.analysis, Y = Y.analysis, missing = "sharp", nperm = nperm
     )
     stat.null <- null_dist(
       n = counts$n_obs, m = counts$n_obs_treat, class = class,
       method.list = method.list, Z.perm = Z.perm, nperm = nperm
     )
     sharp_details <- .ri_sharp_details(
-      Z = Z.analysis, Y = Y.analysis, c = c, missing = "random", class = class,
+      Z = Z.analysis, Y = Y.analysis, c = c, missing = "sharp", class = class,
       method.list = method.list, stat.null = stat.null, Z.perm = Z.perm,
       nperm = nperm
     )
-    mode_label <- "complete-case analysis"
+    mode_label <- "sharp missingness"
   }
 
   structure(
     list(
       call = match.call(),
       analysis = analysis,
-      assumption = if (identical(analysis, "complete-case")) "complete-case" else analysis,
+      assumption = analysis,
       mode_label = mode_label,
       stat_null = stat.null,
       stat_obs = sharp_details$stat_obs,

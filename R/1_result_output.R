@@ -14,9 +14,11 @@
 #       - psi(), uci(), etc.
 #   * This file: applied-user interface and presentation logic
 #       - richer result object
-#       - blocked-randomization / cluster-randomization helpers
-#       - missingness/block diagnostics
+#       - cluster-randomization helpers
+#       - missingness diagnostics
 #       - print()/summary() methods
+#
+# Individual-level designs are analyzed as complete randomization.
 #
 # In other words, this file mostly asks:
 #   "How should we package and display the underlying RI calculations?"
@@ -36,15 +38,15 @@
 #' @param Y Observed outcome (\eqn{n \times 1} vector, including `NA`s).
 #' @param c A scalar that specifies the sharp null hypothesis.
 #' @param missing A string that specifies the missing mechanism.
+#' @param X Optional data frame (or matrix) of numeric pretreatment covariates,
+#'   one row per unit, in the same order as `Z` and `Y`. It is used only to
+#'   check missing at random: when `missing = "random"`, the note on that
+#'   assumption reports the p-value of [test_missing_at_random()]. `X` is not
+#'   used in the main analysis, so the table is the same with or without it.
+#'   It is ignored for the other assumptions and when `cluster` is supplied.
 #' @param class A string that specifies the class of test statistic for the
 #'   sharp-null procedure.
 #' @param method.list A list that specifies the choice of test statistic.
-#' @param block An optional block identifier vector. If supplied, permutations
-#'   are generated within blocks while preserving the treated count in each
-#'   block.
-#' @param block_missing_sum A logical value indicating whether the printed
-#'   output should also show the distribution (median, IQR, range) of the
-#'   within-block treatment - control missingness differences.
 #' @param cluster An optional cluster identifier vector. If supplied, the
 #'   analysis treats clusters as the unit of analysis.
 #' @param cluster_outcome A string that specifies how individual outcomes are
@@ -75,10 +77,8 @@
 #'
 #' @return An object of class `riattrition_result`.
 #' @export
-ri_sharp_attrition <- function(Z, Y, c = 0, missing = "general", class = "RS",
+ri_sharp_attrition <- function(Z, Y, c = 0, missing = "general", X = NULL, class = "RS",
                                method.list = list(name = "Wilcoxon"),
-                               block = NULL,
-                               block_missing_sum = TRUE,
                                cluster = NULL,
                                cluster_outcome = "mean_observed",
                                cluster_missing = "all_missing",
@@ -95,12 +95,11 @@ ri_sharp_attrition <- function(Z, Y, c = 0, missing = "general", class = "RS",
   }
 
   analysis_data <- .ri_prepare_analysis_data(
-    Z = Z, Y = Y, block = block, cluster = cluster,
+    Z = Z, Y = Y, cluster = cluster,
     cluster_outcome = cluster_outcome, cluster_missing = cluster_missing
   )
   Z.analysis <- analysis_data$Z
   Y.analysis <- analysis_data$Y
-  block.analysis <- analysis_data$block
 
   # Put the units in a random order before any ranking. Ties are broken by
   # position (ties.method = "first"), and Li, Sheng & Yu (2025, Section 4.2.2)
@@ -110,16 +109,12 @@ ri_sharp_attrition <- function(Z, Y, c = 0, missing = "general", class = "RS",
   new_order <- .ri_random_order(length(Z.analysis))
   Z.analysis <- Z.analysis[new_order]
   Y.analysis <- Y.analysis[new_order]
-  if (!is.null(block.analysis)) {
-    block.analysis <- block.analysis[new_order]
-  }
   if (!is.null(Z.perm)) {
     Z.perm <- Z.perm[new_order, , drop = FALSE]   # rows follow the units
   }
 
   assumptions_reported <- unique(c("general", missing))
   counts <- .ri_missing_counts(Z.analysis, Y.analysis)
-  block_diagnostics <- .ri_block_diagnostics(Z = Z.analysis, Y = Y.analysis, block = block.analysis)
   test_name <- .ri_test_label(class = class, method.list = method.list)
   notes <- character(0)
 
@@ -133,17 +128,29 @@ ri_sharp_attrition <- function(Z, Y, c = 0, missing = "general", class = "RS",
   results_list <- vector("list", length = 0)
   mc_replications <- integer(0)
 
+  # The general, mp and mn rows all use every randomized unit, so they share
+  # one set of random re-assignments (drawn the first time it is needed). The
+  # rows are then compared on the same draws, and plot_ri_test_stat() run with
+  # the same seed shows the same p-value as the matching row.
+  Z.perm_all_units <- NULL
+
   for (assumption_i in assumptions_reported) {
     # The original package expects a permutation matrix Z.perm.  If the user
-    # does not supply one, we construct it here using either:
-    #   * complete randomization (assign_CRE() from 0_function_sharp_null.R), or
-    #   * blocked randomization (.ri_assign_blocked(), added in this file).
-    Z.perm_i <- if (length(assumptions_reported) == 1 && !is.null(Z.perm)) {
-      Z.perm
+    # does not supply one, we construct it here by complete randomization
+    # (assign_CRE() from 0_function_sharp_null.R).
+    if (length(assumptions_reported) == 1 && !is.null(Z.perm)) {
+      Z.perm_i <- Z.perm
+    } else if (assumption_i %in% c("general", "mp", "mn")) {
+      if (is.null(Z.perm_all_units)) {
+        Z.perm_all_units <- .ri_default_assignments(
+          Z = Z.analysis, Y = Y.analysis, missing = assumption_i, nperm = nperm
+        )
+      }
+      Z.perm_i <- Z.perm_all_units
     } else {
-      .ri_default_assignments(
-        Z = Z.analysis, Y = Y.analysis, missing = assumption_i,
-        block = block.analysis, nperm = nperm
+      # sharp / random: only units with observed outcomes are re-assigned.
+      Z.perm_i <- .ri_default_assignments(
+        Z = Z.analysis, Y = Y.analysis, missing = assumption_i, nperm = nperm
       )
     }
 
@@ -235,16 +242,32 @@ ri_sharp_attrition <- function(Z, Y, c = 0, missing = "general", class = "RS",
 
   results <- do.call(rbind, results_list)
 
-  # Test of the monotone missingness assumption, when mp or mn is used (not for
-  # cluster designs). test_monotone_missingness() is in R/4_missingness_tests.R.
-  # .ri_keep_seed() restores the random-number state afterwards, so adding this
-  # test does not change any other result.
-  monotone_test <- NULL
-  if (missing %in% c("mp", "mn") && identical(analysis_data$inference_unit, "individual")) {
-    monotone_test <- .ri_keep_seed(test_monotone_missingness(
-      Z = Z.analysis, Y = Y.analysis, assumption = missing,
-      block = block.analysis, nperm = nperm
-    ))
+  # p-value of the test of the monotone missingness assumption, reported in the
+  # notes when mp, mn or sharp is used. test_monotone_missingness() is in
+  # R/4_missingness_tests.R and assumes complete randomization of individuals,
+  # so it is not computed with clusters. It uses the same random
+  # re-assignments as the general, mp and mn rows (Z.perm_all_units), so it
+  # draws no new random numbers and does not change any other result.
+  monotone_pval <- NULL
+  if (missing %in% c("mp", "mn", "sharp") &&
+      identical(analysis_data$inference_unit, "individual")) {
+    monotone_pval <- test_monotone_missingness(Z = Z.analysis, Y = Y.analysis,
+                                               assumption = missing,
+                                               Z.perm = Z.perm_all_units)
+  }
+
+  # p-value of the test of missing at random, reported in the notes when
+  # missing = "random" and the covariates X are given. test_missing_at_random()
+  # is also in R/4_missingness_tests.R. X is used only here, not in the table
+  # above. Like the test above, it is not computed with clusters. It
+  # re-randomizes Z among the units with an observed outcome nperm times, with
+  # new random numbers, after the table is computed, so the table is the same
+  # with or without X. It uses the Z, Y and X given by the user, in their
+  # original order.
+  random_pval <- NULL
+  if (missing == "random" && !is.null(X) &&
+      identical(analysis_data$inference_unit, "individual")) {
+    random_pval <- test_missing_at_random(Z = Z, Y = Y, X = X, nperm = nperm)
   }
 
   # Return a richer S3 object than the original scalar p-value interface.  The
@@ -266,10 +289,9 @@ ri_sharp_attrition <- function(Z, Y, c = 0, missing = "general", class = "RS",
       cluster_outcome = analysis_data$cluster_outcome,
       cluster_missing = analysis_data$cluster_missing,
       cluster_diagnostics = analysis_data$cluster_diagnostics,
-      block_diagnostics = block_diagnostics,
-      block_missing_sum = block_missing_sum,
-      assumption_hint = .ri_assumption_hint(counts, block_diagnostics),
-      monotone_test = monotone_test,
+      assumption_hint = .ri_assumption_hint(counts),
+      monotone_pval = monotone_pval,
+      random_pval = random_pval,
       results = results,
       confidence_level = 1 - alpha,
       beta = beta,
@@ -290,15 +312,14 @@ ri_test <- ri_sharp_attrition
 # If cluster is NULL, the package behaves exactly as before.  If cluster is
 # supplied, this helper converts individual-level inputs into cluster-level
 # vectors and all downstream inference treats clusters as the units.
-.ri_prepare_analysis_data <- function(Z, Y, block, cluster,
+.ri_prepare_analysis_data <- function(Z, Y, cluster,
                                       cluster_outcome = "mean_observed",
                                       cluster_missing = "all_missing") {
   if (is.null(cluster)) {
     return(list(
       Z = Z,
       Y = Y,
-      block = block,
-      design = if (is.null(block)) "complete randomization" else "blocked randomization",
+      design = "complete randomization",
       inference_unit = "individual",
       cluster_outcome = NULL,
       cluster_missing = NULL,
@@ -307,15 +328,14 @@ ri_test <- ri_sharp_attrition
   }
 
   cluster_data <- .ri_cluster_data(
-    Z = Z, Y = Y, block = block, cluster = cluster,
+    Z = Z, Y = Y, cluster = cluster,
     cluster_outcome = cluster_outcome, cluster_missing = cluster_missing
   )
 
   list(
     Z = cluster_data$Z,
     Y = cluster_data$Y,
-    block = cluster_data$block,
-    design = if (is.null(cluster_data$block)) "cluster randomization" else "blocked cluster randomization",
+    design = "cluster randomization",
     inference_unit = "cluster",
     cluster_outcome = cluster_outcome,
     cluster_missing = cluster_missing,
@@ -333,7 +353,7 @@ ri_test <- ri_sharp_attrition
 #
 # The sensitivity option cluster_missing = "any_missing" treats a cluster as
 # missing whenever any individual outcome in that cluster is missing.
-.ri_cluster_data <- function(Z, Y, block, cluster,
+.ri_cluster_data <- function(Z, Y, cluster,
                              cluster_outcome = "mean_observed",
                              cluster_missing = "all_missing") {
   if (!cluster_outcome %in% "mean_observed") {
@@ -344,9 +364,6 @@ ri_test <- ri_sharp_attrition
   }
   if (length(cluster) != length(Z) || length(Y) != length(Z)) {
     stop("Z, Y, and cluster must have the same length.")
-  }
-  if (!is.null(block) && length(block) != length(Z)) {
-    stop("block must have the same length as Z when supplied.")
   }
 
   cluster_chr <- as.character(cluster)
@@ -360,7 +377,6 @@ ri_test <- ri_sharp_attrition
     response_rate = NA_real_,
     Z = NA_real_,
     Y = NA_real_,
-    block = if (is.null(block)) NA_character_ else NA_character_,
     stringsAsFactors = FALSE
   )
 
@@ -370,14 +386,6 @@ ri_test <- ri_sharp_attrition
     Zi <- unique(stats::na.omit(Z[idx]))
     if (length(Zi) != 1) {
       stop("Treatment assignment must be constant within each cluster.")
-    }
-
-    if (!is.null(block)) {
-      bi <- unique(stats::na.omit(as.character(block[idx])))
-      if (length(bi) != 1) {
-        stop("Block assignment must be constant within each cluster when block is supplied.")
-      }
-      cluster_table$block[i] <- bi[[1]]
     }
 
     Yi <- Y[idx]
@@ -402,7 +410,6 @@ ri_test <- ri_sharp_attrition
   list(
     Z = cluster_table$Z,
     Y = cluster_table$Y,
-    block = if (is.null(block)) NULL else cluster_table$block,
     cluster_table = cluster_table,
     n_individuals = length(Z),
     n_clusters = length(clusters),
@@ -473,162 +480,33 @@ ri_test <- ri_sharp_attrition
 # This is also presentation-only logic.  It gives the user a gentle reminder
 # about whether the observed attrition pattern is more compatible with mp or mn.
 # Importantly, it does NOT claim to identify the true missingness mechanism.
-#
-# In blocked designs the arms are compared within blocks (the block-size
-# weighted difference from .ri_block_diagnostics()).  When the treated share
-# differs across blocks, the pooled difference mixes block and arm and can even
-# have the opposite sign.
-.ri_attrition_comparison <- function(counts, block_diagnostics = NULL, tol = 1e-8) {
-  pooled_diff <- counts$attrition_rate_treat - counts$attrition_rate_control
-  within_diff <- if (is.null(block_diagnostics)) {
-    NA_real_
-  } else {
-    block_diagnostics$weighted_mean_within_block_attrition_diff
-  }
-  use_blocks <- !is.na(within_diff)
-  diff <- if (use_blocks) within_diff else pooled_diff
-  list(
-    pooled_diff = pooled_diff,
-    within_diff = within_diff,
-    use_blocks = use_blocks,
-    diff = diff,
-    reversed = use_blocks && abs(pooled_diff) > tol && abs(diff) > tol &&
-      sign(pooled_diff) != sign(diff)
-  )
-}
-
-.ri_assumption_hint <- function(counts, block_diagnostics = NULL, tol = 1e-8) {
-  cmp <- .ri_attrition_comparison(counts, block_diagnostics, tol)
-  use_blocks <- cmp$use_blocks
-  diff <- cmp$diff
-  subject <- if (use_blocks) "Within blocks (block-size weighted), treated" else "Treated"
+.ri_assumption_hint <- function(counts, tol = 1e-8) {
+  diff <- counts$attrition_rate_treat - counts$attrition_rate_control
 
   if (abs(diff) <= tol) {
-    hint <- if (use_blocks) {
-      "Within blocks (block-size weighted), treated and control attrition rates are very similar; rates alone do not favor mp or mn."
-    } else {
-      "Observed treated and control attrition rates are very similar; rates alone do not favor mp or mn."
-    }
+    "Observed treated and control attrition rates are very similar; rates alone do not favor mp or mn."
   } else if (diff < 0) {
-    hint <- paste(subject, "attrition is lower than control attrition; this is more consistent with mp than mn, although rates alone do not identify the missingness mechanism.")
+    "Treated attrition is lower than control attrition; this is more consistent with mp than mn, although rates alone do not identify the missingness mechanism."
   } else {
-    hint <- paste(subject, "attrition is higher than control attrition; this is more consistent with mn than mp, although rates alone do not identify the missingness mechanism.")
+    "Treated attrition is higher than control attrition; this is more consistent with mn than mp, although rates alone do not identify the missingness mechanism."
   }
-
-  if (cmp$reversed) {
-    hint <- paste(hint, .ri_reversal_sentence)
-  }
-
-  hint
 }
 
-.ri_reversal_sentence <- "The pooled attrition rates point the other way because they also reflect differences between blocks (for example, different treated shares); the within-block comparison is the relevant one."
-
-#----------- New helper: block-level attrition diagnostics --------------------#
+#----------- New helper: random re-assignments --------------------------------#
 #
-# This helper exists because the original package assumed complete randomization.
-# For blocked designs, users usually want to know not just pooled attrition, but
-# also whether attrition differences are systematically positive/negative within
-# block.
-.ri_block_diagnostics <- function(Z, Y, block) {
-  if (is.null(block)) {
-    return(NULL)
-  }
-
-  block <- as.character(block)
-  M <- as.numeric(!is.na(Y))
-  blocks <- unique(block)
-
-  block_table <- data.frame(
-    block = blocks,
-    n = NA_integer_,
-    treated_n = NA_integer_,
-    control_n = NA_integer_,
-    treated_attrition_rate = NA_real_,
-    control_attrition_rate = NA_real_,
-    attrition_diff = NA_real_,
-    stringsAsFactors = FALSE
-  )
-
-  for (i in seq_along(blocks)) {
-    b <- blocks[[i]]
-    idx <- which(block == b)
-    Zb <- Z[idx]
-    Mb <- M[idx]
-
-    treated_n <- sum(Zb == 1)
-    control_n <- sum(Zb == 0)
-    treated_missing <- sum(Zb == 1 & Mb == 0)
-    control_missing <- sum(Zb == 0 & Mb == 0)
-
-    treated_rate <- if (treated_n > 0) treated_missing / treated_n else NA_real_
-    control_rate <- if (control_n > 0) control_missing / control_n else NA_real_
-
-    block_table$n[i] <- length(idx)
-    block_table$treated_n[i] <- treated_n
-    block_table$control_n[i] <- control_n
-    block_table$treated_attrition_rate[i] <- treated_rate
-    block_table$control_attrition_rate[i] <- control_rate
-    block_table$attrition_diff[i] <- treated_rate - control_rate
-  }
-
-  # Blocks without both arms have no within-block difference and are dropped.
-  valid <- !is.na(block_table$attrition_diff)
-  valid_diff <- block_table$attrition_diff[valid]
-  valid_n <- block_table$n[valid]
-  q <- if (length(valid_diff) > 0) {
-    stats::quantile(valid_diff, probs = c(0.25, 0.5, 0.75), names = FALSE)
-  } else {
-    c(NA_real_, NA_real_, NA_real_)
-  }
-
-  list(
-    n_blocks = length(blocks),
-    n_blocks_used = sum(valid),
-    # The mean weights each block by its share of units (n_b / N, over the blocks
-    # used), so it estimates the average effect of treatment on attrition for the
-    # whole sample rather than for the average block. The quantiles stay
-    # unweighted: they describe how the block-level differences are spread out.
-    weighted_mean_within_block_attrition_diff = if (length(valid_diff) > 0) stats::weighted.mean(valid_diff, valid_n) else NA_real_,
-    median_within_block_attrition_diff = if (length(valid_diff) > 0) stats::median(valid_diff) else NA_real_,
-    min_within_block_attrition_diff = if (length(valid_diff) > 0) min(valid_diff) else NA_real_,
-    q1_within_block_attrition_diff = q[[1]],
-    q3_within_block_attrition_diff = q[[3]],
-    max_within_block_attrition_diff = if (length(valid_diff) > 0) max(valid_diff) else NA_real_,
-    block_table = block_table
-  )
-}
-
-#----------- New helper: choose the permutation scheme ------------------------#
-#
-# This is the main design-aware addition in this file.
-#
-# Old behavior:
-#   * complete randomization only, via assign_CRE()
-#
-# New behavior:
-#   * if block is supplied, generate permutations within block while preserving
-#     the treated count in each block.
-#
+# Complete randomization, via assign_CRE() from 0_function_sharp_null.R.
 # For missing = general/mp/mn, inference is defined on all randomized units.
 # For other cases, inference is restricted to observed units, matching the logic
 # in the legacy functions.
-.ri_default_assignments <- function(Z, Y, missing, block, nperm) {
+.ri_default_assignments <- function(Z, Y, missing, nperm) {
   M <- as.numeric(!is.na(Y))
 
   if (missing %in% c("general", "mp", "mn")) {
-    if (is.null(block)) {
-      # assign_CRE() comes from 0_function_sharp_null.R.
-      return(assign_CRE(length(Z), sum(Z), nperm))
-    }
-    return(.ri_assign_blocked(Z = Z, block = block, nperm = nperm))
+    return(assign_CRE(length(Z), sum(Z), nperm))
   }
 
   Z.obs <- Z[M == 1]
-  if (is.null(block)) {
-    return(assign_CRE(length(Z.obs), sum(Z.obs), nperm))
-  }
-  .ri_assign_blocked(Z = Z.obs, block = block[M == 1], nperm = nperm)
+  assign_CRE(length(Z.obs), sum(Z.obs), nperm)
 }
 
 #----------- New helper: share of the null distribution at or above a value ---#
@@ -654,37 +532,6 @@ ri_test <- ri_sharp_attrition
   on.exit(assign(".Random.seed", old_seed, envir = globalenv()))
   set.seed(sample.int(.Machine$integer.max, 1))
   sample.int(n)
-}
-
-#----------- New helper: blocked permutation matrix --------------------------#
-#
-# This function has no analogue in the original complete-randomization code.
-# It implements the natural randomization distribution for a blocked experiment:
-#   * blocks stay fixed,
-#   * the treated count within each block stays fixed,
-#   * treatment labels are shuffled only inside each block.
-.ri_assign_blocked <- function(Z, block, nperm) {
-  block <- as.character(block)
-  blocks <- unique(block)
-  n <- length(Z)
-  Z.perm <- matrix(0, nrow = n, ncol = nperm)
-
-  block_index <- lapply(blocks, function(b) which(block == b))
-  block_treat <- vapply(block_index, function(idx) sum(Z[idx]), numeric(1))
-
-  for (iter in seq_len(nperm)) {
-    draw <- integer(n)
-    for (j in seq_along(block_index)) {
-      idx <- block_index[[j]]
-      m <- block_treat[[j]]
-      if (m > 0) {
-        draw[sample(idx, m, replace = FALSE)] <- 1L
-      }
-    }
-    Z.perm[, iter] <- draw
-  }
-
-  Z.perm
 }
 
 #----------- New helper: user-facing test statistic label ---------------------#
@@ -1157,8 +1004,8 @@ ri_test <- ri_sharp_attrition
 #
 # print.riattrition_result() writes a compact plain-text report in four parts:
 #   1. a header: outcome, design, test, and sharp null;
-#   2. outcome missingness: overall and by arm, the treatment - control
-#      difference, and for blocked designs the within-block differences;
+#   2. outcome missingness: overall and by arm, and the treatment - control
+#      difference;
 #   3. the inference table: one row per missingness assumption;
 #   4. notes explaining what is in the table.
 # The notes for "general" and "mn" and the note on p-values and confidence
@@ -1265,23 +1112,28 @@ ri_test <- ri_sharp_attrition
 # Note for one non-general missingness assumption shown in the table.
 .ri_assumption_note <- function(assumption, x, tol = 1e-8) {
   if (assumption == "random") {
-    return(paste(
-      "Missing at random means that whether an outcome is missing is unrelated to the",
-      "potential outcomes; the test then uses the observed outcomes only."
-    ))
+    text <- paste(
+      "Missing at random means that each unit's pair M(1), M(0), where M(z) = 1 indicates",
+      "an observed outcome, is an independent draw from the same distribution, unrelated to",
+      "the potential outcomes; the test then uses the observed outcomes only."
+    )
+    # Result of test_missing_at_random() (only when the covariates X are given).
+    if (!is.null(x$random_pval)) {
+      p_text <- if (x$random_pval < 0.001) "p < 0.001" else paste0("p = ", .ri_pvalue(x$random_pval))
+      text <- paste(text, "A check of this assumption, testing whether the covariates in X are",
+                    "balanced between treated and control units with an observed outcome,",
+                    paste0("gives ", p_text, "."))
+    }
+    return(text)
   }
+  # sharp, mp or mn: describe the assumption.
   if (assumption == "sharp") {
-    return(paste(
+    text <- paste(
       "M(z) = 1 indicates an observed outcome. The assumption M(1) = M(0) means that",
       "treatment does not change whether any outcome is observed; the test then uses the",
       "observed outcomes only."
-    ))
-  }
-
-  # mp or mn: describe the assumption, then say whether the observed rates
-  # point the same way. With blocks the within-block (block-weighted)
-  # difference is used, otherwise the unadjusted one.
-  if (assumption == "mn") {
+    )
+  } else if (assumption == "mn") {
     text <- paste(
       "M(z) = 1 indicates an observed outcome. The assumption M(1) \u2264 M(0) means that",
       "every outcome observed under treatment would also be observed under control."
@@ -1293,17 +1145,26 @@ ri_test <- ri_sharp_attrition
     )
   }
 
-  difference <- .ri_attrition_comparison(x$counts, x$block_diagnostics, tol)$diff
-  if (assumption == "mn") {
-    rates_agree <- difference >= -tol
-  } else {
-    rates_agree <- difference <= tol
+  # mp or mn: say whether the observed rates point the same way.
+  if (assumption %in% c("mp", "mn")) {
+    difference <- x$counts$attrition_rate_treat - x$counts$attrition_rate_control
+    if (assumption == "mn") {
+      rates_agree <- difference >= -tol
+    } else {
+      rates_agree <- difference <= tol
+    }
+
+    if (rates_agree) {
+      text <- paste(text, "The observed rates are compatible with this assumption but cannot verify this assumption.")
+    } else {
+      text <- paste(text, "The observed rates point the other way, which casts doubt on this assumption.")
+    }
   }
 
-  if (rates_agree) {
-    text <- paste(text, "The observed rates are compatible with this assumption but cannot verify this assumption.")
-  } else {
-    text <- paste(text, "The observed rates point the other way, which casts doubt on this assumption.")
+  # Result of test_monotone_missingness() (complete randomization only).
+  if (!is.null(x$monotone_pval)) {
+    p_text <- if (x$monotone_pval < 0.001) "p < 0.001" else paste0("p = ", .ri_pvalue(x$monotone_pval))
+    text <- paste0(text, " Testing this assumption gives ", p_text, ".")
   }
   text
 }
@@ -1374,8 +1235,8 @@ print.riattrition_result <- function(x, ...) {
   # 1. Header -----------------------------------------------------------------
   .ri_print_title("Randomization inference with attrition", underline = "=")
   cat("Outcome: ", x$outcome_name, "\n", sep = "")
-  # e.g. "individual-level blocked randomization"; cluster designs already
-  # say "cluster randomization".
+  # "individual-level complete randomization"; cluster designs already say
+  # "cluster randomization".
   if (identical(x$inference_unit, "individual")) {
     cat("Design: individual-level ", x$design, "\n", sep = "")
   } else {
@@ -1401,30 +1262,6 @@ print.riattrition_result <- function(x, ...) {
   cat("\nTreatment \u2212 control missingness difference:\n")
   unadjusted <- counts$attrition_rate_treat - counts$attrition_rate_control
   cat(.ri_pad_right("Unadjusted:", label_width), .ri_pad_left(.ri_pct(unadjusted, plus = TRUE), 24), "\n", sep = "")
-  blocks <- x$block_diagnostics
-  if (!is.null(blocks)) {
-    cat(.ri_pad_right("Block-weighted:", label_width),
-        .ri_pad_left(.ri_pct(blocks$weighted_mean_within_block_attrition_diff, plus = TRUE), 24), "\n", sep = "")
-    cat("\nBlocks: ", blocks$n_blocks, " total; ", blocks$n_blocks_used,
-        " contain both treatment arms.\n", sep = "")
-    if (isTRUE(x$block_missing_sum)) {
-      cat("\nWithin-block treatment \u2212 control differences:\n")
-      iqr <- paste0("[", .ri_pct(blocks$q1_within_block_attrition_diff), ", ",
-                    .ri_pct(blocks$q3_within_block_attrition_diff), "]")
-      range <- paste0("[", .ri_pct(blocks$min_within_block_attrition_diff), ", ",
-                      .ri_pct(blocks$max_within_block_attrition_diff), "]")
-      cat(.ri_pad_right("Median:", label_width), .ri_pad_left(.ri_pct(blocks$median_within_block_attrition_diff), 24), "\n", sep = "")
-      cat(.ri_pad_right("IQR:", label_width), .ri_pad_left(iqr, 24), "\n", sep = "")
-      cat(.ri_pad_right("Range:", label_width), .ri_pad_left(range, 24), "\n", sep = "")
-    }
-  }
-
-  # Test of the monotone missingness assumption (mp or mn only).
-  mt <- x$monotone_test
-  if (!is.null(mt)) {
-    p_text <- if (mt$p_value < 0.001) "p < 0.001" else paste0("p = ", .ri_pvalue(mt$p_value))
-    cat("\nTest of ", mt$hypothesis, ": ", p_text, " (", mt$method, ")\n", sep = "")
-  }
 
   # Cluster designs are not redesigned yet: their summary is printed as before.
   if (!is.null(x$cluster_diagnostics)) {

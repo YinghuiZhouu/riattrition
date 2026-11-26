@@ -1,0 +1,868 @@
+---
+title: "Ranking under blocked randomization: options for `riattrition`"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    embed-resources: true
+    code-fold: true
+    code-summary: "Code"
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Summary
+
+In a blocked (stratified) experiment, treatment is assigned at random **within**
+each block. Our wrapper's `block =` option currently combines two things that do
+not fit together: the paper's rank-sum test, which ranks all units together, and
+re-assignments drawn within blocks. The resulting p-values depend on the order of
+the rows in the data. This has to be settled before we analyze Chen and Yang
+(2019) with its strata or re-run the Bowles application.
+
+This note explains the problem from the beginning and compares six ways to compute
+the test:
+
+| Option | How units are ranked | Re-assignments used for the null distribution |
+|:--|:--|:--|
+| Blocks ignored | all units together | complete randomization of all units (not the actual design) |
+| A. Current code | all units together for the observed statistic, but row positions for the null distribution | within blocks |
+| B. Overall ranks | all units together | within blocks |
+| C. Within-block ranks, weight 1/n_b | separately in each block | within blocks |
+| D. Within-block ranks, weight 1/(n_b + 1) | separately in each block (van Elteren's stratified Wilcoxon test) | within blocks |
+| E. Within-block ranks, no weights | separately in each block | within blocks |
+
+Main points:
+
+1. Under complete randomization, the null distribution of the rank sum is the same
+   whatever the outcomes are. This is why the paper's worst-case rule for missing
+   outcomes gives a valid p-value (Section 2).
+2. Under blocked randomization with all units ranked together, the null
+   distribution depends on the outcomes (Section 3). Option A, the current code,
+   is not valid; a second bug in the blocked re-assignments (one-unit blocks) is
+   now fixed (Section 4). Option B is valid when no outcome is missing, but with missing
+   outcomes the paper's worst-case rule no longer guarantees the largest p-value
+   (Section 3.3).
+3. Ranking within each block (options C, D and E) keeps the null distribution free
+   of the outcomes in every block, so the worst-case rule works block by block.
+   The block weights change only power, not validity (Section 5).
+4. Proposal: option D, which is the classical stratified Wilcoxon test (van
+   Elteren 1960); option C is almost the same. Questions for the team are in
+   Section 8.
+
+```{r}
+library(haven)
+library(knitr)
+
+# Package root relative to this file (analysis/..).
+package_dir <- normalizePath("..")
+source(file.path(package_dir, "R", "0_function_sharp_null.R"))   # assign_CRE()
+source(file.path(package_dir, "R", "1_result_output.R"))         # .ri_assign_blocked()
+
+fmt3 <- function(x) formatC(x, digits = 3, format = "f")
+show_p <- function(p) ifelse(p < 0.001, "<0.001", fmt3(p))
+# A table of p-values with three decimals, keeping the row and column names.
+format_grid <- function(m) matrix(fmt3(m), nrow(m), dimnames = dimnames(m))
+```
+
+## 1. Setting and notation
+
+- There are n units. Z_i = 1 if unit i is treated and 0 if it is a control.
+- M_i = 1 if the outcome of unit i is observed and 0 if it is missing (as in Li,
+  Sheng & Yu 2025). Y_i is the outcome, known only when M_i = 1.
+- The null hypothesis is the sharp null of no effect: treatment does not change
+  anyone's outcome. The alternative is a positive effect (one-sided test).
+- **Wilcoxon rank-sum statistic.** Rank all outcomes from the smallest (rank 1)
+  to the largest (rank n) and add up the ranks of the treated units: W. A large W
+  means that treated units tend to have large outcomes. The package reports W / n
+  (ranks divided by n); dividing by a constant does not change any p-value, so
+  this note uses W.
+- **p-value.** Re-assign treatment many times in the way it was actually
+  assigned, recompute the statistic each time, and take the share of
+  re-assignments whose statistic is at least as large as the observed one. The
+  collection of these statistics is the **null distribution**.
+
+Every option in this note can be written in one form: each unit gets a **score**
+(its rank, or its rank times a weight), and the statistic is the sum of the
+scores of the treated units.
+
+```{r}
+# ---- Scores: the statistic is always the sum of the treated units' scores ----
+
+# Overall ranks: all units ranked together. Ties are broken by position, so the
+# data must be in random order (paper, Section 4.2.2).
+overall_scores <- function(y) rank(y, ties.method = "first")
+
+# Within-block ranks, times the block weight:
+#   C: 1 / n_b    D: 1 / (n_b + 1)  (van Elteren)    E: 1 (no weight)
+within_block_scores <- function(y, block, option) {
+  scores <- numeric(length(y))
+  for (b in unique(block)) {
+    i <- which(block == b)
+    n_b <- length(i)
+    weight <- switch(option, C = 1 / n_b, D = 1 / (n_b + 1), E = 1)
+    scores[i] <- weight * rank(y[i], ties.method = "first")
+  }
+  scores
+}
+
+treated_sum <- function(scores, z) sum(scores[z == 1])
+
+# Share of re-assignments with a statistic at least as large as the observed
+# one (a tiny tolerance guards against rounding in sums of fractions).
+p_value <- function(stat_null, stat_obs) {
+  mean(stat_null >= stat_obs - 1e-9 * max(1, abs(stat_obs)))
+}
+
+# ---- Every possible re-assignment, for the small examples (one row each) ----
+
+# Complete randomization: any n1 of the n units can be the treated ones.
+all_assignments <- function(n, n1) {
+  treated_sets <- combn(n, n1, simplify = FALSE)
+  t(sapply(treated_sets, function(s) as.numeric(seq_len(n) %in% s)))
+}
+
+# Blocked randomization: within each block, any set of the same number of
+# treated units as in the actual assignment Z.
+all_blocked_assignments <- function(Z, block) {
+  blocks <- unique(block)
+  choices <- lapply(blocks, function(b) {
+    i <- which(block == b)
+    lapply(combn(length(i), sum(Z[i]), simplify = FALSE), function(k) i[k])
+  })
+  grid <- expand.grid(lapply(choices, seq_along))
+  out <- matrix(0, nrow(grid), length(Z))
+  for (r in seq_len(nrow(grid))) {
+    for (b in seq_along(blocks)) {
+      out[r, choices[[b]][[grid[r, b]]]] <- 1
+    }
+  }
+  out
+}
+
+# Exact p-value from all re-assignments (rows of `assignments`).
+exact_p <- function(scores, Z, assignments) {
+  p_value(as.vector(assignments %*% scores), treated_sum(scores, Z))
+}
+
+# ---- Missing outcomes ----
+
+# The paper's worst-case completion under the sharp null of no effect (Table 1
+# of Li, Sheng & Yu 2025): under general missingness, treated missing outcomes
+# go to the bottom and control missing outcomes to the top; under monotone
+# positive missingness (mp), all missing outcomes go to the top.
+worst_case <- function(Z, Y, assumption) {
+  y <- Y
+  if (assumption == "general") {
+    y[Z == 1 & is.na(Y)] <- -Inf
+    y[Z == 0 & is.na(Y)] <- Inf
+  }
+  if (assumption == "mp") {
+    y[is.na(Y)] <- Inf
+  }
+  y
+}
+
+# Possible values for a missing outcome: below all observed values, between each
+# pair of neighbouring observed values, and above all of them. Together they
+# cover every position the missing outcome can take in the ranking.
+candidate_values <- function(y_observed) {
+  v <- sort(y_observed)
+  c(v[1] - 1, (head(v, -1) + tail(v, -1)) / 2, v[length(v)] + 1)
+}
+```
+
+## 2. Complete randomization: why the paper's worst-case rule works
+
+### 2.1 A small example
+
+Six units, three of them treated:
+
+```{r}
+Z6 <- c(1, 1, 1, 0, 0, 0)
+Y6 <- c(3.1, 5.4, 4.2, 1.8, 2.5, 3.6)
+r6 <- overall_scores(Y6)
+
+kable(data.frame(Unit = 1:6, Z = Z6, Y = Y6, Rank = r6), align = "r")
+```
+
+The observed statistic is W = `r paste(r6[Z6 == 1], collapse = " + ")` =
+`r treated_sum(r6, Z6)`.
+
+### 2.2 The null distribution does not depend on the outcomes
+
+Under complete randomization, any 3 of the 6 units could have been the treated
+ones: there are `r choose(6, 3)` possible assignments, all equally likely. For each
+one we compute W:
+
+```{r}
+A6 <- all_assignments(6, 3)
+W_null <- as.vector(A6 %*% r6)
+
+# A completely different outcome vector gives the same list of W values.
+Y6_other <- c(10, -2, 7, 0.5, 30, 4)
+W_null_other <- as.vector(A6 %*% overall_scores(Y6_other))
+
+kable(as.data.frame(table(W = W_null), responseName = "Number of assignments"), align = "r")
+```
+
+The p-value is the share of assignments with W at least `r treated_sum(r6, Z6)`:
+`r fmt3(exact_p(r6, Z6, A6))`.
+
+Whatever the outcomes, the ranks are always the numbers 1 to 6, so W under a
+re-assignment is always the sum of three of the numbers 1 to 6. The list of W
+values is therefore the same for every outcome vector (here, sorting the two lists
+gives identical results: `r identical(sort(W_null), sort(W_null_other))`). The null
+distribution depends only on n and on the number of treated units. Statisticians
+call this **distribution-free**.
+
+### 2.3 Missing outcomes: the worst-case completion
+
+Now suppose the outcomes of unit 2 (treated) and unit 5 (control) are missing.
+Under general missingness we know nothing about them, so each **completion** (a
+value for each missing outcome) is possible, and each completion gives a p-value.
+A valid p-value must be at least as large as all of them. The table shows the
+p-value for every position of the two missing outcomes:
+
+```{r}
+Y6_missing <- Y6
+Y6_missing[c(2, 5)] <- NA
+candidates <- candidate_values(Y6_missing[!is.na(Y6_missing)])
+gap_label <- function(v) {
+  c(paste("below", v[1]), paste(head(v, -1), "to", tail(v, -1)), paste("above", v[length(v)]))
+}
+labels6 <- gap_label(sort(Y6_missing[!is.na(Y6_missing)]))
+
+p_grid <- matrix(NA, length(candidates), length(candidates),
+                 dimnames = list(paste("Unit 2 (treated):", labels6),
+                                 paste("Unit 5:", labels6)))
+for (a in seq_along(candidates)) {
+  for (b in seq_along(candidates)) {
+    y <- Y6_missing
+    y[2] <- candidates[a]
+    y[5] <- candidates[b]
+    p_grid[a, b] <- exact_p(overall_scores(y), Z6, A6)
+  }
+}
+kable(format_grid(p_grid), align = "r")
+```
+
+Rows give the value of the missing treated outcome (unit 2), columns the value of
+the missing control outcome (unit 5). The largest p-value in the table,
+`r fmt3(max(p_grid))`, is the one in the top-right cell, where unit 2 is below all
+observed values and unit 5 is above all of them. This is exactly the paper's
+worst-case completion (its p-value:
+`r fmt3(exact_p(overall_scores(worst_case(Z6, Y6_missing, "general")), Z6, A6))`).
+
+The reason: the null distribution is the same for every completion (Section 2.2),
+so the p-value is largest when the observed W is smallest, and W is smallest when
+the missing treated outcome is ranked last and the missing control outcome first.
+Under mp the paper's rule puts all missing outcomes at the top; the same argument
+applies. **This argument needs the null distribution to stay the same when the
+completion changes.**
+
+### 2.4 Ties
+
+When outcomes are tied (for example all missing outcomes set to the same extreme
+value), ranks are given by position, after the units have been put in random order
+(paper, Section 4.2.2). Our wrapper now does this. Section 7 shows that the random
+order still matters when there are many ties.
+
+## 3. Blocked randomization with all units ranked together
+
+### 3.1 Blocked randomization
+
+Eight units in two blocks of four; in each block, two units are treated. Under
+blocked randomization only the units **within** a block can swap treatment:
+there are choose(4, 2) x choose(4, 2) = `r choose(4, 2)^2` possible assignments,
+instead of choose(8, 4) = `r choose(8, 4)` under complete randomization.
+
+### 3.2 The null distribution now depends on the outcomes
+
+Two outcome vectors. In the first, every outcome in block b is larger than every
+outcome in block a. In the second, the outcomes of the two blocks are interleaved.
+
+```{r}
+block8 <- rep(c("a", "b"), each = 4)
+Z8 <- c(1, 0, 1, 0, 1, 0, 0, 1)
+Y8_separated <- c(1.2, 2.0, 2.9, 3.5, 4.1, 5.0, 5.8, 6.6)
+Y8_interleaved <- c(1.2, 2.9, 4.1, 5.8, 2.0, 3.5, 5.0, 6.6)
+A8 <- all_blocked_assignments(Z8, block8)
+
+null_summary <- function(y) {
+  W <- as.vector(A8 %*% overall_scores(y))
+  c(Smallest = min(W), Largest = max(W), Mean = mean(W), SD = round(sd(W), 2))
+}
+kable(rbind(
+  "Separated blocks" = null_summary(Y8_separated),
+  "Interleaved blocks" = null_summary(Y8_interleaved)
+), caption = "Null distribution of W (overall ranks) over the 36 blocked re-assignments.")
+```
+
+With separated blocks, block a always holds ranks 1 to 4 and block b ranks 5 to 8,
+and each block always has two treated units, so W can only range from
+1 + 2 + 5 + 6 = 14 to 3 + 4 + 7 + 8 = 22. With interleaved blocks the range is
+wider. **Same design, same number of treated units, different null
+distributions:** with overall ranks, the null distribution depends on how the
+outcomes are spread across blocks.
+
+For complete data this is not a problem: we compute the null distribution from the
+data at hand, and the test (option B) is valid. The problem appears with missing
+outcomes.
+
+### 3.3 Missing outcomes: the worst-case rule can fail under option B
+
+With overall ranks, each completion of the missing outcomes changes the ranks and
+therefore the null distribution. The argument of Section 2.3 then breaks down:
+the completion with the smallest observed statistic need not give the largest
+p-value. Here is a small example, found by a computer search:
+
+```{r}
+block7 <- c("a", "a", "a", "b", "b", "b", "b")
+Z7 <- c(0, 0, 1, 0, 1, 1, 1)
+Y7 <- c(-0.12, NA, 1.47, 2.15, 0.73, NA, 0.60)
+kable(data.frame(Unit = 1:7, Block = block7, Z = Z7, Y = Y7), align = "r")
+```
+
+Unit 2 (a control) and unit 6 (treated) have missing outcomes. The tables give
+the exact p-value for every position of the two missing outcomes, first with
+overall ranks (option B), then with within-block ranks (option D):
+
+```{r}
+A7 <- all_blocked_assignments(Z7, block7)
+observed7 <- sort(Y7[!is.na(Y7)])
+candidates7 <- candidate_values(observed7)
+labels7 <- gap_label(observed7)
+
+completion_grid <- function(score_fun) {
+  out <- matrix(NA, length(candidates7), length(candidates7),
+                dimnames = list(paste("Unit 2 (control):", labels7),
+                                paste("Unit 6:", labels7)))
+  for (a in seq_along(candidates7)) {
+    for (b in seq_along(candidates7)) {
+      y <- Y7
+      y[2] <- candidates7[a]
+      y[6] <- candidates7[b]
+      out[a, b] <- exact_p(score_fun(y), Z7, A7)
+    }
+  }
+  out
+}
+
+grid_B <- completion_grid(overall_scores)
+grid_D <- completion_grid(function(y) within_block_scores(y, block7, "D"))
+y7_worst <- worst_case(Z7, Y7, "general")
+p7_B_worst <- exact_p(overall_scores(y7_worst), Z7, A7)
+p7_D_worst <- exact_p(within_block_scores(y7_worst, block7, "D"), Z7, A7)
+
+kable(format_grid(grid_B), align = "r", caption = "Option B (overall ranks): exact p-value for each completion.")
+kable(format_grid(grid_D), align = "r", caption = "Option D (within-block ranks): exact p-value for each completion.")
+```
+
+The paper's worst-case completion puts the missing control outcome (unit 2) above
+all observed values and the missing treated outcome (unit 6) below all of them
+(last row, first column).
+
+- **Option B:** the worst-case completion gives p = `r fmt3(p7_B_worst)`, but
+  another completion gives `r fmt3(max(grid_B))`. Reporting the worst-case p-value
+  would understate the valid p-value.
+- **Option D:** the worst-case completion gives p = `r fmt3(p7_D_worst)`, and no
+  completion gives more (largest value in the table: `r fmt3(max(grid_D))`).
+
+How often does this happen? We drew small random experiments (two blocks of 3 to
+6 units, one or two missing outcomes, random outcomes with block differences and
+a random effect), computed the exact p-value for every completion, and compared
+the largest one with the worst-case p-value under general missingness:
+
+```{r}
+check_examples <- function(n_examples = 1000, seed = 21) {
+  set.seed(seed)
+  rows <- NULL
+  for (e in seq_len(n_examples)) {
+    sizes <- sample(3:6, 2, replace = TRUE)
+    block <- rep(c("a", "b"), sizes)
+    Z <- unlist(lapply(sizes, function(n_b) {
+      n1_b <- sample(1:(n_b - 1), 1)
+      sample(c(rep(1, n1_b), rep(0, n_b - n1_b)))
+    }))
+    n <- length(Z)
+    Y <- round(rnorm(n) + runif(1, 0, 2) * Z + ifelse(block == "b", rnorm(1, 0, 2), 0), 2)
+    Y[sample(n, sample(1:2, 1))] <- NA
+    missing_units <- which(is.na(Y))
+    assignments <- all_blocked_assignments(Z, block)
+    candidates <- candidate_values(Y[!is.na(Y)])
+    completions <- as.matrix(expand.grid(rep(list(candidates), length(missing_units))))
+    score_funs <- list(
+      B = overall_scores,
+      C = function(y) within_block_scores(y, block, "C"),
+      D = function(y) within_block_scores(y, block, "D"),
+      E = function(y) within_block_scores(y, block, "E")
+    )
+    for (option in names(score_funs)) {
+      p_all <- apply(completions, 1, function(v) {
+        y <- Y
+        y[missing_units] <- v
+        exact_p(score_funs[[option]](y), Z, assignments)
+      })
+      p_worst <- exact_p(score_funs[[option]](worst_case(Z, Y, "general")), Z, assignments)
+      rows <- rbind(rows, data.frame(option, p_worst, p_max = max(p_all)))
+    }
+  }
+  rows
+}
+
+examples <- check_examples()
+examples$fails <- examples$p_max > examples$p_worst + 1e-9
+n_examples <- nrow(examples) / 4
+
+check_table <- do.call(rbind, lapply(split(examples, examples$option), function(d) {
+  data.frame(
+    Option = d$option[1],
+    `Examples where another completion gives a larger p-value` = sum(d$fails),
+    `Largest excess over the worst-case p-value` = fmt3(max(d$p_max - d$p_worst)),
+    `Smallest worst-case p-value among these examples` =
+      if (any(d$fails)) fmt3(min(d$p_worst[d$fails])) else "-",
+    check.names = FALSE
+  )
+}))
+kable(check_table, row.names = FALSE, align = c("l", "r", "r", "r"),
+      caption = paste(n_examples, "random small experiments, general missingness, exact p-values."))
+```
+
+```{r}
+fails_B <- examples[examples$option == "B" & examples$fails, ]
+```
+
+For option B the worst-case rule failed in `r nrow(fails_B)` of `r n_examples`
+experiments. In these examples it happened only when the p-value was not small
+(the smallest worst-case p-value among the failures is
+`r fmt3(min(fails_B$p_worst))`), so we did not find a case where option B rejects
+at the 5% level although some completion would not. We have no proof that such a
+case cannot occur. For options C, D and E the worst-case p-value was the largest
+p-value in every experiment, as the argument of Section 5.2 says it must be.
+
+## 4. The current code (option A)
+
+The original function `null_dist()` (in `R/0_function_sharp_null.R`) was written
+for complete randomization. It does not look at the outcomes at all: it gives the
+unit in row j of the data the score j / n and adds up the scores of the rows that
+a re-assignment treats. Under complete randomization this is correct, because the
+null distribution does not depend on which unit holds which rank (Section 2.2).
+
+Our wrapper passes re-assignments drawn **within blocks** to this function. Then
+row positions are used in place of ranks: which positions can be treated together
+depends on which rows belong to which block, so the null distribution changes when
+the rows of the data are reordered. The observed statistic, in contrast, uses the
+actual ranks. The example of Section 3.2 (separated blocks, no missing outcomes),
+with the same eight units listed in three different orders:
+
+```{r}
+option_A_p <- function(order) {
+  y <- Y8_separated[order]
+  z <- Z8[order]
+  b <- block8[order]
+  assignments <- all_blocked_assignments(z, b)
+  positions <- seq_along(y)   # row j gets the score j, whatever its outcome
+  p_value(as.vector(assignments %*% positions), treated_sum(overall_scores(y), z))
+}
+option_B_p <- function(order) {
+  y <- Y8_separated[order]
+  z <- Z8[order]
+  assignments <- all_blocked_assignments(z, block8[order])
+  exact_p(overall_scores(y), z, assignments)
+}
+
+orders8 <- list(
+  "Block a first, then block b" = 1:8,
+  "Block b first, then block a" = c(5:8, 1:4),
+  "Blocks alternating" = c(1, 5, 2, 6, 3, 7, 4, 8)
+)
+kable(data.frame(
+  `Order of the rows` = names(orders8),
+  `Option A (current code)` = sapply(orders8, function(o) fmt3(option_A_p(o))),
+  `Option B (overall ranks)` = sapply(orders8, function(o) fmt3(option_B_p(o))),
+  check.names = FALSE
+), row.names = FALSE, align = c("l", "r", "r"),
+caption = "Exact p-values for the same data, listed in three orders.")
+```
+
+The data and the design are the same in all three rows; only the order in which
+the units are listed differs. Option A gives different p-values, option B does
+not. (In the first order the rows happen to be sorted by outcome, so row positions
+equal ranks and A agrees with B.) Option A is a bug, not a method.
+
+**A second problem, now fixed.** While preparing this note we found that the
+function that draws re-assignments within blocks, `.ri_assign_blocked()`, mishandled
+blocks with a single unit. It used `sample(idx, m)` to choose the treated units of
+a block; when a block has one unit, `idx` is a single number such as 523, and R
+then draws from 1 to 523, so treatment went to a random unit anywhere in the data.
+In a test with a treated one-unit block, the old code kept that unit treated in
+only 15% of the draws. The function now uses `idx[sample.int(length(idx), m)]`,
+and a test checks that every block keeps its number of treated units. Chen and
+Yang has one-unit blocks (Section 6.1), and all results in this note use the
+corrected function. Earlier blocked results (the Bowles note) used the old one.
+
+## 5. Ranking within blocks (options C, D and E)
+
+### 5.1 The statistic
+
+Rank the outcomes **separately in each block** (from 1 to n_b, the size of block
+b), multiply each rank by a block weight w_b, and add up the results for the
+treated units. The three options differ only in the weight:
+
+- C: w_b = 1 / n_b,
+- D: w_b = 1 / (n_b + 1), the stratified Wilcoxon test of van Elteren (1960),
+- E: w_b = 1 (no weight).
+
+The example of Section 3.2 (separated blocks):
+
+```{r}
+kable(data.frame(
+  Block = block8, Z = Z8, Y = Y8_separated,
+  `Overall rank` = overall_scores(Y8_separated),
+  `Within-block rank` = within_block_scores(Y8_separated, block8, "E"),
+  `Score C` = round(within_block_scores(Y8_separated, block8, "C"), 3),
+  `Score D` = round(within_block_scores(Y8_separated, block8, "D"), 3),
+  `Score E` = within_block_scores(Y8_separated, block8, "E"),
+  check.names = FALSE
+), align = c("l", rep("r", 7)))
+```
+
+### 5.2 Why it is valid, and why the worst-case rule works
+
+1. **Within a block, assignment is a complete randomization of that block.** So
+   each block's treated rank sum has the distribution-free null distribution of
+   Section 2.2, which depends only on n_b and the number of treated units in the
+   block.
+2. **Blocks are assigned independently.** The null distribution of the weighted
+   sum is the distribution of a sum of independent distribution-free pieces, so
+   it does not depend on the outcomes either. In the separated and interleaved
+   examples of Section 3.2, within-block ranks give exactly the same null
+   distribution:
+   `r identical(sort(as.vector(A8 %*% within_block_scores(Y8_separated, block8, "D"))), sort(as.vector(A8 %*% within_block_scores(Y8_interleaved, block8, "D"))))`.
+3. **Missing outcomes.** A completion changes only the observed statistic. The
+   paper's worst-case completion (general: missing treated outcomes at the bottom
+   and missing control outcomes at the top; mp: all missing outcomes at the top)
+   gives the smallest treated rank sum in **every block at the same time**. With
+   positive weights, it therefore gives the smallest weighted sum and the largest
+   p-value. The paper's argument applies block by block, for any positive weights.
+
+The examples in Section 3.3 agree: for C, D and E the worst-case p-value was always
+the largest one.
+
+### 5.3 Choosing the weights
+
+The weights do not affect validity, only **power** (the chance of detecting a real
+effect). They decide how much each block counts.
+
+**How much each block counts.** Two blocks: a small one (20 units, 10 treated)
+and a large one (200 units, 100 treated). Under the null, a block's weighted rank
+sum has variance w_b^2 n1_b n0_b (n_b + 1) / 12; the share of the total variance
+that comes from the small block shows its weight in the test:
+
+```{r}
+block_variance <- function(w, n1, n0) w^2 * n1 * n0 * (n1 + n0 + 1) / 12
+share_small <- function(w_small, w_large) {
+  v_small <- block_variance(w_small, 10, 10)
+  v_large <- block_variance(w_large, 100, 100)
+  v_small / (v_small + v_large)
+}
+kable(data.frame(
+  Option = c("C. 1 / n_b", "D. 1 / (n_b + 1)", "E. no weight"),
+  `Share of the small block` = paste0(round(100 * c(
+    share_small(1 / 20, 1 / 200), share_small(1 / 21, 1 / 201), share_small(1, 1)
+  ), 1), "%"),
+  check.names = FALSE
+), row.names = FALSE, align = c("l", "r"))
+```
+
+With C or D, every treated unit counts about equally, so the small block, with 10
+of the 110 treated units, has about 9% of the weight. With E, ranks in the large
+block are ten times larger than in the small block, so the small block almost
+disappears.
+
+**Power.** The same two blocks, no missing outcomes, outcomes drawn from a normal
+distribution with standard deviation 1. Share of 500 simulated experiments in which
+each option rejects at the 5% level (2,000 Monte Carlo re-assignments each):
+
+```{r}
+power_table <- function(n_sims = 500, nperm = 2000) {
+  block <- rep(c("small", "large"), c(20, 200))
+  Z_design <- c(rep(c(1, 0), 10), rep(c(1, 0), 100))
+  set.seed(5)
+  Zp <- .ri_assign_blocked(Z = Z_design, block = block, nperm = nperm)
+  scenarios <- list(
+    "Effect of 1 SD in the small block only" = c(small = 1, large = 0),
+    "Effect of 0.25 SD in the large block only" = c(small = 0, large = 0.25),
+    "Effect of 0.25 SD in both blocks" = c(small = 0.25, large = 0.25)
+  )
+  rows <- NULL
+  for (s in names(scenarios)) {
+    effect <- scenarios[[s]][block]
+    rejections <- c(C = 0, D = 0, E = 0)
+    for (k in seq_len(n_sims)) {
+      Z <- ave(Z_design, block, FUN = sample)   # a new assignment within blocks
+      Y <- rnorm(length(Z)) + effect * Z
+      for (option in c("C", "D", "E")) {
+        scores <- within_block_scores(Y, block, option)
+        p <- p_value(colSums(scores * Zp), treated_sum(scores, Z))
+        rejections[option] <- rejections[option] + (p <= 0.05)
+      }
+    }
+    rows <- rbind(rows, data.frame(Scenario = s, t(fmt3(rejections / n_sims)), check.names = FALSE))
+  }
+  names(rows) <- c("Scenario", "C. 1 / n_b", "D. 1 / (n_b + 1)", "E. no weight")
+  rows
+}
+kable(power_table(), row.names = FALSE, align = c("l", "r", "r", "r"))
+```
+
+C and D behave almost the same in every scenario. When the effect sits only in
+the small block, E has much less power, because it puts nearly all the weight on
+the large block. When the effect sits only in the large block, or is the same in
+both blocks, the three options are about equally powerful here (differences of
+0.02 or less are within simulation error). For a common shift in all blocks, van
+Elteren (1960) showed that the weights 1 / (n_b + 1) of option D give the locally
+most powerful test of this kind, that is, the most powerful against small effects.
+Unless block sizes are similar, E is not a good default, because it can almost
+ignore small blocks.
+
+### 5.4 Blocks with only treated or only control units
+
+If every unit in a block is treated (or every unit is a control), the block's
+treated rank sum is the same in every re-assignment. It adds a constant to both
+the observed statistic and the null distribution and does not change the p-value:
+such a block carries no information about the effect, as in any stratified
+analysis. Section 6.1 counts these blocks in Chen and Yang.
+
+## 6. Chen and Yang (2019)
+
+### 6.1 The strata
+
+The paper stratified the randomization by university, gender and cohort (p.
+2308). We rebuild the strata from these three variables; students with a missing
+gender or cohort form blocks of their own (the label contains `NA`). Each
+comparison keeps the students in one treated group and in the control group.
+
+```{r}
+full_data_path <- "/Users/yinghuizhou/Library/CloudStorage/Dropbox/Projects/intro_rand_inf_missing/0_paper and data survey/1_field experiments/datasets_potential/3 Chen and Yang -- Media censorship/panelsurvey_clean.dta"
+full_data <- zap_labels(read_dta(full_data_path))
+randomized <- full_data[full_data$treatment_user == 0, ]
+
+contrast_data <- function(arm_var) {
+  dat <- randomized[randomized[[arm_var]] == 1 | randomized$treatment_control == 1, ]
+  dat$Z <- dat[[arm_var]]
+  dat$block <- paste(dat$university, dat$gender, dat$year_started_college)
+  dat
+}
+contrasts <- list(
+  "AE vs C" = contrast_data("treatment_vpnnl"),
+  "A vs C" = contrast_data("treatment_vpnonly"),
+  "CE vs C" = contrast_data("treatment_nlonly")
+)
+
+block_summary <- function(dat) {
+  sizes <- table(dat$block)
+  treated <- tapply(dat$Z, dat$block, sum)
+  both_arms <- treated > 0 & treated < sizes
+  c(Students = nrow(dat),
+    Blocks = length(sizes),
+    `Blocks with both groups` = sum(both_arms),
+    `Students in one-group blocks` = sum(sizes[!both_arms]),
+    `Smallest block` = min(sizes),
+    `Median block` = median(sizes),
+    `Largest block` = max(sizes))
+}
+kable(t(sapply(contrasts, block_summary)), align = "r")
+```
+
+### 6.2 p-values under each option
+
+All options use the same random order of the students (for ties) and, within each
+comparison, the same 10,000 re-assignments within blocks; "blocks ignored" uses
+10,000 re-assignments under complete randomization. For option A we show the
+range of p-values over three orders of the rows: the random order, the students
+sorted by block, and the reverse of that.
+
+```{r}
+outcome_vars <- paste0("az_overall_", letters[1:5], "_w3")
+outcome_names <- c("A. Media", "B. Knowledge", "C. Economic beliefs",
+                   "D. Political attitudes", "E. Behaviors")
+
+options_for_contrast <- function(dat, comparison, nperm = 10^4) {
+  set.seed(2023)
+  dat <- dat[sample(nrow(dat)), ]                  # random order of the students
+  n <- nrow(dat)
+  set.seed(2024)
+  Zp_blocked <- .ri_assign_blocked(Z = dat$Z, block = dat$block, nperm = nperm)
+  Zp_complete <- assign_CRE(n, sum(dat$Z), nperm)
+
+  # Option A: the student in row j gets the score j. Its null distribution does
+  # not depend on the outcomes, only on the order of the rows.
+  row_orders <- list(seq_len(n), order(dat$block), rev(order(dat$block)))
+  null_A <- lapply(row_orders, function(o) colSums(match(seq_len(n), o) * Zp_blocked))
+
+  rows <- NULL
+  for (k in seq_along(outcome_vars)) {
+    for (assumption in c("general", "mp")) {
+      y <- worst_case(dat$Z, dat[[outcome_vars[k]]], assumption)
+      r <- overall_scores(y)
+      p_A <- sapply(null_A, function(null) p_value(null, treated_sum(r, dat$Z)))
+      p_within <- sapply(c("C", "D", "E"), function(option) {
+        s <- within_block_scores(y, dat$block, option)
+        p_value(colSums(s * Zp_blocked), treated_sum(s, dat$Z))
+      })
+      rows <- rbind(rows, data.frame(
+        Comparison = comparison,
+        Outcome = outcome_names[k],
+        Assumption = assumption,
+        `Blocks ignored` = p_value(colSums(r * Zp_complete), treated_sum(r, dat$Z)),
+        `A min` = min(p_A),
+        `A max` = max(p_A),
+        `B. Overall ranks` = p_value(colSums(r * Zp_blocked), treated_sum(r, dat$Z)),
+        `C. Within, 1/n_b` = p_within[["C"]],
+        `D. Within, van Elteren` = p_within[["D"]],
+        `E. Within, no weights` = p_within[["E"]],
+        check.names = FALSE
+      ))
+    }
+  }
+  rows
+}
+
+block_results <- do.call(rbind, lapply(names(contrasts), function(name) {
+  options_for_contrast(contrasts[[name]], name)
+}))
+
+display <- block_results
+display$`A. Current code` <- paste(show_p(display$`A min`), "to", show_p(display$`A max`))
+display <- display[c("Comparison", "Outcome", "Assumption", "Blocks ignored",
+                     "A. Current code", "B. Overall ranks", "C. Within, 1/n_b",
+                     "D. Within, van Elteren", "E. Within, no weights")]
+for (col in c("Blocks ignored", "B. Overall ranks", "C. Within, 1/n_b",
+              "D. Within, van Elteren", "E. Within, no weights")) {
+  display[[col]] <- show_p(display[[col]])
+}
+kable(display, row.names = FALSE, align = c("l", "l", "l", rep("r", 6)),
+      caption = "One-sided p-values (alternative: positive effect), 10,000 Monte Carlo re-assignments.")
+```
+
+### 6.3 What the table shows
+
+```{r}
+pick <- function(comparison, outcome, assumption, column) {
+  block_results[block_results$Comparison == comparison &
+                  block_results$Outcome == outcome &
+                  block_results$Assumption == assumption, column]
+}
+a_range <- block_results$`A max` - block_results$`A min`
+cd_gap <- abs(block_results$`C. Within, 1/n_b` - block_results$`D. Within, van Elteren`)
+widest <- which.max(a_range)
+a_low <- show_p(block_results$`A min`[widest])
+a_high <- show_p(block_results$`A max`[widest])
+```
+
+- **Option A is not usable.** For the same data, its p-value moves with the order
+  of the rows; the widest range in this table goes from `r a_low` to `r a_high`.
+- **C and D are close in every row** (largest difference
+  `r fmt3(max(cd_gap))`).
+- **Using the blocks can move a p-value a lot.** For the access-only effect on the
+  media index under mp, ignoring the blocks gives
+  `r fmt3(pick("A vs C", "A. Media", "mp", "Blocks ignored"))`, while options C and
+  D give `r fmt3(pick("A vs C", "A. Media", "mp", "C. Within, 1/n_b"))` and
+  `r fmt3(pick("A vs C", "A. Media", "mp", "D. Within, van Elteren"))`, close to
+  0.05. A p-value this close to 0.05 also moves with the random order of the
+  students (Section 7) and with the Monte Carlo draws (standard error about
+  0.002), so it should be reported as borderline whichever option is chosen.
+- **E differs from C and D** in several rows, because it lets the largest strata
+  dominate.
+- **Under general missingness nothing is significant** with any option: with
+  about a quarter of the outcomes missing, the worst case is too extreme.
+
+## 7. Ties and the random order
+
+Under mp, every missing outcome is set to the same value (the top), so about a
+quarter of the students are tied, and the random order that breaks the ties
+decides their ranks. This is a separate issue that within-block ranks do not
+solve. The p-value for the access-only effect on the media index under mp, with
+20 different random orders of the students and the same re-assignments:
+
+```{r}
+order_spread <- function(dat, outcome, assumption, n_orders = 20, nperm = 10^4) {
+  n <- nrow(dat)
+  set.seed(2024)
+  Zp_blocked <- .ri_assign_blocked(Z = dat$Z, block = dat$block, nperm = nperm)
+  Zp_complete <- assign_CRE(n, sum(dat$Z), nperm)
+  y <- worst_case(dat$Z, dat[[outcome]], assumption)
+  p <- NULL
+  for (s in seq_len(n_orders)) {
+    set.seed(s)
+    o <- sample(n)                      # a new random order of the students
+    # Ranks in this order (ties broken by position), mapped back to the students.
+    r <- numeric(n)
+    r[o] <- overall_scores(y[o])
+    d <- numeric(n)
+    d[o] <- within_block_scores(y[o], dat$block[o], "D")
+    p <- rbind(p, c(
+      `Blocks ignored` = p_value(colSums(r * Zp_complete), treated_sum(r, dat$Z)),
+      `D. Within, van Elteren` = p_value(colSums(d * Zp_blocked), treated_sum(d, dat$Z))
+    ))
+  }
+  p
+}
+spread <- order_spread(contrasts[["A vs C"]], "az_overall_a_w3", "mp")
+kable(data.frame(
+  Option = colnames(spread),
+  Smallest = fmt3(apply(spread, 2, min)),
+  Median = fmt3(apply(spread, 2, median)),
+  Largest = fmt3(apply(spread, 2, max))
+), row.names = FALSE, align = c("l", "r", "r", "r"),
+caption = "A vs. C, media index, mp: p-values over 20 random orders.")
+```
+
+The spread is much larger than the Monte Carlo error. With option D the p-value
+ranges from `r fmt3(min(spread[, "D. Within, van Elteren"]))` to
+`r fmt3(max(spread[, "D. Within, van Elteren"]))`, so whether this result is
+significant at the 5% level depends on the random order alone. Whichever ranking
+we choose, we should decide whether to report this spread or to average over
+several random orders.
+
+## 8. Proposal and questions for discussion
+
+**Proposal.**
+
+- For blocked designs, use within-block ranks with van Elteren's weights
+  1 / (n_b + 1) (option D), after putting the units in random order. Option C
+  gives almost the same results.
+- Change only our wrapper: the observed statistic and the null distribution in
+  `.ri_sharp_details()`, the confidence interval, and `plot_ri_test_stat()`. The
+  original functions stay as they are. The change is small: with blocks, each
+  unit's score becomes its within-block rank times 1 / (n_b + 1), for the observed
+  statistic and for every re-assignment.
+- Without blocks nothing changes: with a single block, options C, D and E all give
+  the paper's test.
+
+**Questions.**
+
+1. Does the paper's worst-case argument extend to within-block ranks as described
+   in Section 5.2?
+2. Option D or option C?
+3. For the replication paper: report Chen and Yang with the strata (the actual
+   design), and show "blocks ignored" as a comparison?
+4. Is it acceptable that blocks with only treated or only control students carry
+   no information (Section 5.4)?
+5. Ties under mp and mn (Section 7): report the spread over random orders, or
+   average over several orders?
+
+After the decision, the Bowles application, which uses `block =`, will be re-run.
+
+## References
+
+- Li, Xinran, Peizan Sheng, and Zeyang Yu. 2025. "Randomization Inference with
+  Sample Attrition." arXiv:2507.00795.
+- Chen, Yuyu, and David Y. Yang. 2019. "The Impact of Media Censorship: 1984 or
+  Brave New World?" *American Economic Review* 109(6): 2294-2332.
+- van Elteren, P. H. 1960. "On the Combination of Independent Two-Sample Tests of
+  Wilcoxon." *Bulletin of the International Statistical Institute* 37: 351-361.

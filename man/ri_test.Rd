@@ -9,10 +9,9 @@ ri_sharp_attrition(
   Y,
   c = 0,
   missing = "general",
+  X = NULL,
   class = "RS",
   method.list = list(name = "Wilcoxon"),
-  block = NULL,
-  block_missing_sum = TRUE,
   cluster = NULL,
   cluster_outcome = "mean_observed",
   cluster_missing = "all_missing",
@@ -37,16 +36,14 @@ ri_sharp_attrition(
 
 \item{missing}{A string that specifies the missing mechanism.}
 
+\item{X}{Optional data frame (or matrix) of numeric pretreatment covariates,
+one row per unit, in the same order as \code{Z} and \code{Y}. It is used only
+to check missing at random (see Details); it is not used in the main
+analysis.}
+
 \item{class}{A string that specifies the class of test statistic for the sharp-null procedure.}
 
 \item{method.list}{A list that specifies the choice of test statistic.}
-
-\item{block}{An optional block identifier vector. If supplied, permutations are
-generated within blocks while preserving the treated count in each block.}
-
-\item{block_missing_sum}{A logical value indicating whether the printed output
-should also show the distribution (median, IQR, range) of the within-block
-treatment - control missingness differences.}
 
 \item{cluster}{An optional cluster identifier vector. If supplied, the analysis
 treats clusters as the unit of analysis.}
@@ -82,9 +79,13 @@ missing if any individual outcome is missing.}
 }
 \value{
 An object of class \code{riattrition_result}. When \code{missing} is
-\code{"mp"} or \code{"mn"}, its component \code{monotone_test} holds the test of
-that assumption from \code{\link{test_monotone_missingness}()}, and the printed
-output reports its p-value.
+\code{"mp"}, \code{"mn"} or \code{"sharp"} and the design is complete randomization of
+individuals, its component \code{monotone_pval} holds the p-value of the test
+of that assumption from \code{\link{test_monotone_missingness}()}, and the
+note on the assumption reports it. When \code{missing = "random"} and
+\code{X} is given, its component \code{random_pval} holds the p-value of
+\code{\link{test_missing_at_random}()} in the same way. Otherwise these
+components are \code{NULL}.
 }
 \description{
 \code{ri_sharp_attrition()} wraps the existing sharp-null attrition inference
@@ -92,11 +93,30 @@ functions and returns a richer result object with a default printed summary.
 The printed output is a compact plain-text report: a header (outcome, design,
 test, sharp null), outcome missingness overall and by arm, one row of Monte
 Carlo p-value and confidence interval per missingness assumption, and notes
-explaining the assumptions shown. If \code{block} is supplied, the wrapper uses
-block-respecting permutation draws for the randomization distribution and also
-reports the block-weighted treatment - control missingness difference.
+explaining the assumptions shown. Individual-level data are analyzed as a
+completely randomized experiment.
 If \code{cluster} is supplied, individual-level data are first aggregated to
 cluster-level outcomes, and inference treats clusters as the unit of analysis.
+}
+\details{
+The covariates \code{X} are used only to check the assumption of missing at
+random. When \code{missing = "random"} and \code{X} is given,
+\code{ri_sharp_attrition()} calls \code{test_missing_at_random(Z, Y, X)},
+which tests whether, among the units with an observed outcome, the covariates
+are balanced between the treatment and the control group (a consequence of
+missing at random that can be checked), and adds its p-value to the note on the
+assumption. Its p-value comes from \code{nperm} re-randomizations of the
+treatment among those units, drawn after the table is computed. A small p-value
+is evidence against missing at random; a large one means that we fail to reject
+it, not that it holds.
+
+\code{X} is not used in the main analysis: it does not adjust for the
+covariates, and the test statistics, p-values and confidence intervals in the
+table are the same with or without \code{X}. \code{X} is ignored when
+\code{missing} is \code{"general"}, \code{"mp"}, \code{"mn"} or
+\code{"sharp"}, whose checks need no covariates, and when \code{cluster} is
+supplied, because \code{test_missing_at_random()} treats individuals as the
+units.
 }
 \examples{
 Z <- c(1, 1, 1, 0, 0, 0)
@@ -107,4 +127,18 @@ out <- ri_sharp_attrition(
   nperm = 200, include_ci = FALSE, include_twostep = FALSE
 )
 print(out)
+
+# Missing at random, with two covariates to check this assumption
+set.seed(1)
+n <- 200
+Z <- rep(c(1, 0), each = n / 2)
+X <- data.frame(age = rnorm(n), female = rbinom(n, 1, 0.5))
+Y <- rnorm(n) + Z
+Y[runif(n) < 0.2] <- NA
+out_random <- ri_sharp_attrition(
+  Z = Z, Y = Y, missing = "random", X = X,
+  nperm = 200, include_ci = FALSE
+)
+print(out_random)
+out_random$random_pval
 }

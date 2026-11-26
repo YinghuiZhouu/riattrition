@@ -9,9 +9,8 @@ plot_ri_test_stat(
   c = 0,
   missing = "general",
   class = "RS",
-  analysis = c("general", "mp", "mn", "complete-case"),
+  analysis = c("general", "mp", "mn", "sharp"),
   method.list = list(name = "Wilcoxon"),
-  block = NULL,
   cluster = NULL,
   cluster_outcome = "mean_observed",
   cluster_missing = "all_missing",
@@ -40,21 +39,18 @@ plot_ri_test_stat(
 \item{c}{A scalar that specifies the sharp null hypothesis.}
 
 \item{analysis}{A string that specifies which inferential path to visualize:
-\code{"general"} uses the package's general-missingness procedure, while
-\code{"complete-case"} restricts the analysis to observed outcomes only.}
+\code{"general"}, \code{"mp"} and \code{"mn"} use all randomized units;
+\code{"sharp"} (sharp missingness, \eqn{M_i(1) = M_i(0)}: treatment does not
+change whose outcome is observed) uses the units with observed outcomes only.}
 
-\item{missing}{A string that specifies the missing mechanism. The current
-visualization method uses \code{"general"} when
-\code{analysis = "general"}. It is ignored when
-\code{analysis = "complete-case"}.}
+\item{missing}{A string that specifies the missing mechanism. For
+\code{"general"}, \code{"mp"} and \code{"mn"} it must match \code{analysis}.
+It is ignored when \code{analysis = "sharp"}.}
 
 \item{class}{A string that specifies the class of test statistic for the
 sharp-null procedure.}
 
 \item{method.list}{A list that specifies the choice of test statistic.}
-
-\item{block}{An optional block identifier vector. If supplied, permutations are
-generated within blocks while preserving the treated count in each block.}
 
 \item{cluster}{An optional cluster identifier vector. If supplied, the analysis
 treats clusters as the unit of analysis.}
@@ -117,9 +113,8 @@ null distribution, observed statistic, p-value, and plotting metadata.
 \description{
 \code{plot_ri_test_stat()} draws the randomization null distribution, marks the
 observed test statistic, and highlights the right tail that determines the
-sharp-null p-value. It supports the package's \code{general}, \code{mp}
-and \code{mn} missingness procedures and an observed-only complete-case
-visualization mode.
+sharp-null p-value. It supports the package's \code{general}, \code{mp},
+\code{mn} and \code{sharp} missingness procedures.
 
 The figure shows, from top to bottom: the title, the missingness assumption,
 a legend (right-tail area and kernel density), the null distribution with the

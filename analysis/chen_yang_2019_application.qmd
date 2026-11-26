@@ -173,10 +173,9 @@ treated group with the control group is analyzed as a completely randomized
 experiment: the Monte Carlo permutations reshuffle treatment among all students in
 the two groups, ignoring the strata.
 
-We use complete randomization for now because the package's option for blocked
-designs (`block =`) is being revised. Results under the stratified design will be
-added after the revision. Until then, the reference distribution of the tests does
-not match the way treatment was actually assigned.
+We use complete randomization because the package handles complete randomization
+only. The reference distribution of the tests therefore does not match the way
+treatment was actually assigned.
 
 Two further points about the design:
 
@@ -448,13 +447,16 @@ sapply(contrasts, nrow)
 ### Do the data contradict the monotone assumption?
 
 The package tests the assumption it is asked to use: for `missing = "mp"`,
-`ri_sharp_attrition()` reports a p-value for H0: M_i(1) >= M_i(0) for every
-student, from `test_monotone_missingness()`. The missingness indicator M is
+`ri_sharp_attrition()` adds to its note on the assumption the p-value of
+`test_monotone_missingness()` for H0: M_i(1) >= M_i(0) for every student. The missingness indicator M is
 observed for every randomized student, so the effect of treatment on M can be
 tested like any other effect. A low response rate in the treated group is
 evidence against `mp`; a high one is evidence against the opposite assumption,
-`mn` (M_i(1) <= M_i(0)). Under complete randomization the p-values are exact
-(one-sided Fisher exact tests). The five outcome indices are missing for exactly
+`mn` (M_i(1) <= M_i(0)). The p-values are one-sided randomization p-values
+computed from 10,000 random assignments, as in RIQITE's `pval_bound()`, so they
+can differ in the third decimal from the p-value in the notes of
+`ri_sharp_attrition()`, which uses that function's own random assignments. The
+five outcome indices are missing for exactly
 the same students (see Data Sources), so one test per comparison covers all five
 outcomes. The test is explained and checked against the theory and against
 RIQITE's `pval_bound()` in `monotone_missingness_test_check.qmd`.
@@ -463,14 +465,20 @@ RIQITE's `pval_bound()` in `monotone_missingness_test_check.qmd`.
 mono_table <- NULL
 for (name in names(contrasts)) {
   dat <- contrasts[[name]]
-  mp <- test_monotone_missingness(dat$Z, dat$az_overall_a_w3, assumption = "mp")
-  mn <- test_monotone_missingness(dat$Z, dat$az_overall_a_w3, assumption = "mn")
+  observed <- !is.na(dat$az_overall_a_w3)
+
+  # The same 10,000 random assignments for the mp and the mn test.
+  set.seed(2019)
+  Z.perm <- assign_CRE(nrow(dat), sum(dat$Z), 10^4)
+
   mono_table <- rbind(mono_table, data.frame(
     Comparison = name,
-    `Response rate, treated` = .ri_pct(mp$response_rate_treat),
-    `Response rate, control` = .ri_pct(mp$response_rate_control),
-    `p-value, H0: mp` = .ri_pvalue(mp$p_value),
-    `p-value, H0: mn` = .ri_pvalue(mn$p_value),
+    `Response rate, treated` = .ri_pct(mean(observed[dat$Z == 1])),
+    `Response rate, control` = .ri_pct(mean(observed[dat$Z == 0])),
+    `p-value, H0: mp` = .ri_pvalue(test_monotone_missingness(dat$Z, dat$az_overall_a_w3, "mp",
+                                                             Z.perm = Z.perm)),
+    `p-value, H0: mn` = .ri_pvalue(test_monotone_missingness(dat$Z, dat$az_overall_a_w3, "mn",
+                                                             Z.perm = Z.perm)),
     check.names = FALSE
   ))
 }
@@ -478,7 +486,7 @@ for (name in names(contrasts)) {
 kable(
   mono_table,
   align = c("l", "r", "r", "r", "r"),
-  caption = "Tests of monotone missingness. Exact one-sided tests under complete randomization within each comparison."
+  caption = "Tests of monotone missingness. One-sided randomization tests under complete randomization within each comparison, with 10,000 random assignments."
 )
 ```
 
@@ -576,27 +584,37 @@ How to read the table:
 
 The figures show, for the media index, the randomization distribution of the
 Wilcoxon statistic under the sharp null of no effect, with the observed statistic
-marked. For each comparison there are three versions: no assumption about attrition
-(`general`), monotone positive attrition (`mp`), and a complete-case analysis that
-ignores the students with missing outcomes.
+marked. For each comparison there are three versions, named as in Li, Sheng & Yu
+(2025):
+
+- **General missingness** (`general`): no assumption about attrition.
+- **Monotone positive missingness** (`mp`): treatment never makes an outcome
+  missing, M_i(1) >= M_i(0).
+- **Sharp missingness** (`sharp`): treatment does not change whose outcome is
+  missing, M_i(1) = M_i(0). The students with missing outcomes are then dropped
+  and the test uses the endline respondents only (Section 6.4 of the paper).
+
+Each figure uses the same seed as the media-index row of the results table above,
+so the general and mp p-values below are the same as in that table.
 
 ```{r, fig.width=9, fig.height=5}
 analysis_labels <- c(
-  general = "no assumption on attrition",
-  mp = "monotone positive attrition",
-  "complete-case" = "complete cases only"
+  general = "general missingness",
+  mp = "monotone positive missingness",
+  sharp = "sharp missingness"
 )
 
 plot_summary <- NULL
-for (name in names(contrasts)) {
+for (i in seq_along(contrasts)) {
+  name <- names(contrasts)[i]
   dat <- contrasts[[name]]
   for (analysis in names(analysis_labels)) {
-    set.seed(11215)
+    set.seed(20190 + 10 * i + 1)   # same seed as the media row (k = 1) above
     p <- plot_ri_test_stat(
       Z = dat$Z,
       Y = dat$az_overall_a_w3,
       analysis = analysis,
-      missing = if (analysis == "mp") "mp" else "general",
+      missing = analysis,
       nperm = nperm,
       main = paste0(name, ", media index")
     )
@@ -615,9 +633,9 @@ for (name in names(contrasts)) {
 kable(plot_summary, align = c("l", "l", "r", "r"))
 ```
 
-The complete-case p-values treat the endline respondents as if they were the whole
-randomized sample. They are close to the paper's conclusions, which rest on the same
-respondents.
+Under sharp missingness the test uses only the endline respondents. Its p-values are
+close to Chen and Yang's conclusions, which rest on the same respondents. They are
+valid only if treatment did not change who completed the endline survey.
 
 ## Attrition Diagnostics
 
@@ -625,6 +643,85 @@ These diagnostics follow the other application notes. `M = 1` means the student
 completed the endline survey (as in Li, Sheng & Yu 2025); this is the same for all
 five outcomes. The covariates are baseline characteristics built by the authors'
 do-file. Students with a missing covariate are left out of these regressions.
+
+### A few covariates chosen by the researcher
+
+`attrition_regressions()` uses whatever baseline covariates the researcher passes in
+`X`. With a short list, the two tables are small enough to read and to put in a
+paper. Here: AE vs. control and five covariates. All five are 0/1 indicators built
+by the authors' do-file; `labels` gives each one a display name.
+
+```{r}
+ae <- contrasts[["AE vs C"]]
+
+chosen_covars <- c("h_gender", "h_birth_year", "h_university_elite",
+                   "h_hh_income", "h_az_preference_risk")
+chosen_labels <- c(
+  h_gender = "Male",
+  h_birth_year = "Born before 1996",
+  h_university_elite = "Elite university",
+  h_hh_income = "Household income at or above median",
+  h_az_preference_risk = "Risk preference index > 0"
+)
+
+ar_chosen <- attrition_regressions(
+  M = as.integer(ae$panelmerged_wave3 == 1),
+  Z = ae$Z,
+  X = ae[chosen_covars],
+  labels = chosen_labels
+)
+ar_chosen
+```
+
+The first table regresses M on the covariates separately in each group and shows
+the difference; the second shows the pooled regressions without and with the
+treatment interactions.
+
+```{r}
+kable(
+  attrition_table(ar_chosen, type = "group"),
+  align = c("l", "r", "r", "r", "r"),
+  caption = md_caption("AE vs C, chosen covariates.", attrition_table_note(ar_chosen, type = "group"))
+)
+```
+
+```{r}
+kable(
+  attrition_table(ar_chosen, type = "pooled"),
+  align = c("l", "r", "r"),
+  caption = md_caption("AE vs C, chosen covariates.", attrition_table_note(ar_chosen, type = "pooled"))
+)
+```
+
+`export_attrition_tables()` writes both tables to one file: LaTeX for a paper, or
+Markdown. The Markdown file is meant for people and for AI tools: definitions, the
+two tables with notes, then all numbers in long format. The files are saved in the
+`output` folder next to this document.
+
+```{r}
+dir.create("output", showWarnings = FALSE)
+export_attrition_tables(ar_chosen, format = "markdown",
+                        file = "output/chen_yang_attrition_diagnostics_AE.md")
+export_attrition_tables(ar_chosen, format = "latex",
+                        file = "output/chen_yang_attrition_diagnostics_AE.tex")
+```
+
+::: {.callout-note collapse="true" title="Contents of the Markdown file"}
+```{r, echo=FALSE, comment=""}
+cat(readLines("output/chen_yang_attrition_diagnostics_AE.md", encoding = "UTF-8"), sep = "\n")
+```
+:::
+
+::: {.callout-note collapse="true" title="Contents of the LaTeX file"}
+```{r, echo=FALSE, comment=""}
+cat(readLines("output/chen_yang_attrition_diagnostics_AE.tex", encoding = "UTF-8"), sep = "\n")
+```
+:::
+
+### All baseline covariates
+
+The rest of this section uses all 27 baseline covariates below, for each of the
+three comparisons.
 
 ```{r}
 covars <- c(
@@ -722,8 +819,8 @@ differential attrition.
 ## Notes and Limitations
 
 - **Strata are ignored.** The paper stratified by university, gender, and cohort.
-  The tests here treat each comparison as completely randomized until the package's
-  blocked-design option is revised.
+  The package handles complete randomization only, so the tests here treat each
+  comparison as completely randomized.
 - **One-sided p-values.** The randomization p-values test against a positive
   effect; the paper's OLS p-values are two-sided. For positive estimates the
   one-sided test is the more lenient one, so the loss of significance under `mp` is
